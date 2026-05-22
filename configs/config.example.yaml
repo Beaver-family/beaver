@@ -1,21 +1,5 @@
-general:
-  default_user: ""
-  theme: "dark"
-  log_level: "info"
-
-ssh:
-  connect_timeout: 10
-  keepalive_every: 30
-  known_hosts_file: "~/.ssh/known_hosts"
-  strict_host_key: true
-
 ui:
-  sidebar_width: 26
+  sidebar_width: 26   # width of the file tree panel
   show_key_hints: true
   scroll_speed: 3
   mouse_enabled: true
-
-paths:
-  data_dir: "~/.tui"
-  db_file: "data.db"
-  log_file: "tui.log"

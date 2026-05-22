@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Beaver-family/tui/internal/ui/filetree"
+	"github.com/Beaver-family/beaver/internal/ui/filetree"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

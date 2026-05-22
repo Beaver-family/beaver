@@ -1,7 +1,7 @@
 package styles
 
 import (
-	"github.com/Beaver-family/tui/internal/config"
+	"github.com/Beaver-family/beaver/internal/config"
 	"github.com/charmbracelet/lipgloss"
 )
 

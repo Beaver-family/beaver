@@ -3,9 +3,10 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
-	"github.com/Beaver-family/tui/internal/ui/styles"
+	"github.com/Beaver-family/beaver/internal/ui/styles"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -29,15 +30,32 @@ func (m *model) View() string {
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
 
 	var statusBar string
-	if m.opMode != opNone {
+	if m.opMode != opNone || m.editConfirm {
 		statusBar = m.renderOpStatusBar(m.width, bar)
 	} else {
 		var l1L, l2L string
-		if m.editMode {
+		if m.searchMode {
+			cnt := fmt.Sprintf("  %d results", len(m.searchResults))
+			if m.searchInput.Value() == "" {
+				cnt = "  type to search"
+			}
+			l1L = k("/") + " " + m.searchInput.View() + lipgloss.NewStyle().Foreground(styles.ColorMuted).Render(cnt)
+			l2L = k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("esc") + " exit"
+		} else if m.grepMode {
+			if m.grepResults != nil {
+				l1L = lipgloss.NewStyle().Foreground(styles.ColorAccent).Render(fmt.Sprintf("  %d matches", len(m.grepResults))) +
+					lipgloss.NewStyle().Foreground(styles.ColorMuted).Render(fmt.Sprintf("  for \"%s\"", m.grepQuery))
+				l2L = k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("esc") + " new search"
+			} else if m.grepRunning {
+				l1L = lipgloss.NewStyle().Foreground(styles.ColorMuted).Render(fmt.Sprintf("  searching for \"%s\"...", m.grepQuery))
+				l2L = ""
+			} else {
+				l1L = k("ctrl+f") + " " + m.grepInput.View()
+				l2L = k("enter") + " search" + sep + k("esc") + " cancel"
+			}
+		} else if m.editMode {
 			extras := ""
-			if m.editConfirm {
-				extras = sep + warnStyle.Render("discard changes?") + "  " + k("y") + " yes  " + k("n/esc") + " no"
-			} else if m.editErr != "" {
+			if m.editErr != "" {
 				extras = sep + warnStyle.Render(m.editErr)
 			}
 			l1L = k("ctrl+s") + " save" + sep + k("esc") + " discard" + extras
@@ -46,8 +64,8 @@ func (m *model) View() string {
 			l1L = k("↑/↓") + " scroll" + sep + k("ctrl+d/u") + " half page" + sep + k("g/G") + " top/bot" + sep + k("e") + " edit"
 			l2L = k("tab") + " → files" + sep + k("esc/←") + " sidebar" + sep + k("pgup/dn") + " page"
 		} else {
-			l1L = k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("d") + " delete" + sep + k("r") + " rename"
-			l2L = k("n") + " new file" + sep + k("N") + " new dir" + sep + k("y/x") + " copy/cut" + sep + k("p") + " paste" + sep + k("q") + " quit"
+			l1L = k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("d") + " delete" + sep + k("r") + " rename" + sep + k("/") + " search"
+			l2L = k("n") + " new file" + sep + k("N") + " new dir" + sep + k("y/x") + " copy/cut" + sep + k("p") + " paste" + sep + k("ctrl+f") + " grep" + sep + k("q") + " quit"
 		}
 		l1L = "  " + l1L
 		l2L = "  " + l2L
@@ -76,9 +94,9 @@ func (m *model) View() string {
 	// focus-coloured borders
 	sidebarStyle := styles.StyleSidebar.BorderForeground(styles.ColorBorder)
 	mainStyle := styles.StyleMain.BorderForeground(styles.ColorBorder)
-	if m.editMode {
+	if m.editMode || m.grepMode {
 		mainStyle = styles.StyleMain.BorderForeground(styles.ColorHighlight)
-	} else if m.focus == focusSidebar {
+	} else if m.searchMode || m.focus == focusSidebar {
 		sidebarStyle = styles.StyleSidebar.BorderForeground(styles.ColorAccent)
 	} else {
 		mainStyle = styles.StyleMain.BorderForeground(styles.ColorAccent)
@@ -92,11 +110,16 @@ func (m *model) View() string {
 		treeCap = 1
 	}
 
-	sidebarContent := sidebarLabel("files")
-	if m.filetree != nil {
-		sidebarContent += "\n" + m.filetree.Render(sw-2, treeCap)
+	var sidebarContent string
+	if m.searchMode {
+		sidebarContent = m.renderSearchSidebar(sw-2, panelHeight-2)
+	} else {
+		sidebarContent = sidebarLabel("files")
+		if m.filetree != nil {
+			sidebarContent += "\n" + m.filetree.Render(sw-2, treeCap)
+		}
+		sidebarContent += m.renderSidebarBottom()
 	}
-	sidebarContent += m.renderSidebarBottom()
 
 	sidebar := sidebarStyle.
 		Width(sw).
@@ -110,7 +133,9 @@ func (m *model) View() string {
 	}
 
 	var mainContent string
-	if m.editMode {
+	if m.grepMode {
+		mainContent = capLines(m.renderGrepPanel(mainWidth, panelHeight), panelHeight)
+	} else if m.editMode {
 		mainContent = m.renderEditor()
 	} else {
 		mainContent = capLines(m.renderPreview(mainWidth, panelHeight), panelHeight)
@@ -152,6 +177,11 @@ func (m *model) renderOpStatusBar(width int, bar lipgloss.Style) string {
 		line1 := promptBar.Width(width).Render(question)
 		line2 := bar.Width(width).Render("  " + cancelOpt + "    " + opts)
 		return line1 + "\n" + line2
+	}
+
+	if m.editConfirm {
+		question := fmt.Sprintf(`  Discard unsaved changes to "%s" ?`, displayPath(m.editPath, 40))
+		return optLine(question, kOpt("Y")+" Yes      "+kOpt("N/esc")+" No")
 	}
 
 	switch m.opMode {
@@ -234,8 +264,6 @@ func sidebarLabel(label string) string {
 		Render(strings.ToUpper(label))
 }
 
-
-
 func (m *model) renderEditor() string {
 	accent := lipgloss.NewStyle().Foreground(styles.ColorHighlight)
 	header := accent.Render(" " + displayPath(m.editPath, 60) + "  [editing]")
@@ -308,6 +336,90 @@ func (m *model) renderPreview(width, height int) string {
 
 	body := strings.Join(out, "\n")
 	return header + "\n" + body
+}
+
+// renderSearchSidebar renders the fuzzy-search result list in the sidebar.
+func (m *model) renderSearchSidebar(width, height int) string {
+	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+	dirStyle := lipgloss.NewStyle().Foreground(styles.ColorText)
+	fileStyle := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+	selStyle := lipgloss.NewStyle().Foreground(styles.ColorAccent).Bold(true)
+
+	header := "\n" + lipgloss.NewStyle().Foreground(styles.ColorMuted).Render("SEARCH")
+
+	if len(m.searchResults) == 0 {
+		msg := "  type to search"
+		if m.searchInput.Value() != "" {
+			msg = "  no results"
+		}
+		return header + "\n\n" + muted.Render(msg)
+	}
+
+	var lines []string
+	for i, r := range m.searchResults {
+		if len(lines) >= height-2 {
+			break
+		}
+		icon := "  "
+		style := fileStyle
+		if r.IsDir {
+			icon = "  "
+			style = dirStyle
+		}
+		if i == m.searchSelected {
+			style = selStyle
+		}
+		line := icon + style.Render(truncateLine(r.Name, width-4))
+		lines = append(lines, line)
+	}
+	return header + "\n" + strings.Join(lines, "\n")
+}
+
+// renderGrepPanel renders grep results (or the waiting state) in the main panel.
+func (m *model) renderGrepPanel(width, height int) string {
+	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+	accent := lipgloss.NewStyle().Foreground(styles.ColorAccent)
+	selStyle := lipgloss.NewStyle().Foreground(styles.ColorHighlight).Bold(true)
+
+	if m.grepResults == nil {
+		if m.grepRunning {
+			return muted.Render(fmt.Sprintf("  searching for \"%s\"...", m.grepQuery))
+		}
+		return muted.Render("  enter a search term and press enter")
+	}
+
+	if len(m.grepResults) == 0 {
+		return accent.Render(fmt.Sprintf("  no matches for \"%s\"", m.grepQuery))
+	}
+
+	header := accent.Render(fmt.Sprintf("  %d matches  ", len(m.grepResults))) +
+		muted.Render(fmt.Sprintf("for \"%s\"", m.grepQuery))
+
+	// keep selected row visible
+	visibleRows := height - 2
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+	start := 0
+	if m.grepSelected >= visibleRows {
+		start = m.grepSelected - visibleRows + 1
+	}
+
+	var lines []string
+	for i := start; i < len(m.grepResults) && len(lines) < visibleRows; i++ {
+		r := m.grepResults[i]
+		loc := filepath.Base(r.Path) + ":" + fmt.Sprintf("%d", r.LineNum)
+		locW := 22
+		locStr := accent.Render("  " + truncateLine(loc, locW))
+		var content string
+		if i == m.grepSelected {
+			content = selStyle.Render(truncateLine(r.Line, width-locW-4))
+		} else {
+			content = muted.Render(truncateLine(r.Line, width-locW-4))
+		}
+		lines = append(lines, locStr+"  "+content)
+	}
+	return header + "\n" + strings.Join(lines, "\n")
 }
 
 // truncateLine cuts a string to max visible columns, ANSI-safe.

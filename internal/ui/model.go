@@ -3,7 +3,8 @@ package ui
 import (
 	"time"
 
-	"github.com/Beaver-family/tui/internal/ui/filetree"
+	"github.com/Beaver-family/beaver/internal/ui/filetree"
+	"github.com/Beaver-family/beaver/internal/ui/search"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 )
@@ -42,10 +43,24 @@ type model struct {
 	editErr      string
 
 	// file operations
-	opMode    opMode
-	opInput   textinput.Model
-	opPasteDst string        // destination dir for pending paste confirmation
-	clipboard *filetree.Node
-	clipCut   bool
-	opErr     string
+	opMode     opMode
+	opInput    textinput.Model
+	opPasteDst string // destination dir for pending paste confirmation
+	clipboard  *filetree.Node
+	clipCut    bool
+	opErr      string
+
+	// fuzzy file search
+	searchMode     bool
+	searchInput    textinput.Model
+	searchResults  []search.FileResult
+	searchSelected int
+
+	// content grep
+	grepMode     bool
+	grepInput    textinput.Model
+	grepResults  []search.GrepResult // nil = input phase, non-nil = results phase
+	grepQuery    string
+	grepSelected int
+	grepRunning  bool
 }

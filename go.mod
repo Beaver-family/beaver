@@ -1,4 +1,4 @@
-module github.com/Beaver-family/tui
+module github.com/Beaver-family/beaver
 
 go 1.25.4
 

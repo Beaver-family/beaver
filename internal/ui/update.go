@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Beaver-family/tui/internal/ui/editor"
-	"github.com/Beaver-family/tui/internal/ui/fileops"
-	"github.com/Beaver-family/tui/internal/ui/filetree"
-	"github.com/Beaver-family/tui/internal/ui/preview"
-	"github.com/Beaver-family/tui/internal/ui/styles"
+	"github.com/Beaver-family/beaver/internal/ui/editor"
+	"github.com/Beaver-family/beaver/internal/ui/fileops"
+	"github.com/Beaver-family/beaver/internal/ui/filetree"
+	"github.com/Beaver-family/beaver/internal/ui/preview"
+	"github.com/Beaver-family/beaver/internal/ui/search"
+	"github.com/Beaver-family/beaver/internal/ui/styles"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 )
@@ -31,6 +32,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ── edit mode ────────────────────────────────────────────────────────
 		if m.editMode {
 			return m.updateEditor(msg)
+		}
+
+		// ── search / grep modes ──────────────────────────────────────────────
+		if m.searchMode {
+			return m.updateSearch(msg)
+		}
+		if m.grepMode {
+			return m.updateGrep(msg)
 		}
 
 		// ── normal mode ──────────────────────────────────────────────────────
@@ -180,6 +189,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.opMode = opConfirmPaste
 				m.opErr = ""
 			}
+
+		// ── search ───────────────────────────────────────────────────────────
+		case "f", "/":
+			if m.focus == focusSidebar && m.filetree != nil {
+				m.searchInput = newOpInput("search files...")
+				m.searchMode = true
+				m.searchResults = []search.FileResult{}
+				m.searchSelected = 0
+			}
+
+		case "ctrl+f":
+			if m.filetree != nil {
+				m.grepInput = newOpInput("search file contents...")
+				m.grepMode = true
+				m.grepResults = nil
+				m.grepSelected = 0
+				m.grepQuery = ""
+				m.grepRunning = false
+			}
 		}
 
 	case editReadyMsg:
@@ -222,6 +250,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case fileops.ErrMsg:
 		m.opErr = msg.Op + ": " + msg.Text
+
+	case search.GrepDoneMsg:
+		m.grepRunning = false
+		m.grepQuery = msg.Query
+		if msg.Results == nil {
+			m.grepResults = []search.GrepResult{}
+		} else {
+			m.grepResults = msg.Results
+		}
+		m.grepSelected = 0
+
+	case search.GrepErrMsg:
+		m.grepRunning = false
+		m.grepMode = false
+		m.opErr = "grep: " + msg.Text
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -299,6 +342,100 @@ func (m *model) updateOp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// updateSearch handles keystrokes while fuzzy file search is active.
+func (m *model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.searchMode = false
+		m.searchResults = nil
+		m.searchSelected = 0
+		return m, nil
+	case "enter":
+		if m.searchSelected < len(m.searchResults) {
+			r := m.searchResults[m.searchSelected]
+			if !r.IsDir {
+				m.searchMode = false
+				m.searchResults = nil
+				m.focus = focusMain
+				return m, preview.Load(r.Path)
+			}
+		}
+		return m, nil
+	case "up", "k":
+		if m.searchSelected > 0 {
+			m.searchSelected--
+		}
+		return m, nil
+	case "down", "j":
+		if m.searchSelected < len(m.searchResults)-1 {
+			m.searchSelected++
+		}
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		if m.filetree != nil {
+			m.searchResults = search.FuzzyFiles(m.filetree.Root.Path, m.searchInput.Value())
+			m.searchSelected = 0
+		}
+		return m, cmd
+	}
+}
+
+// updateGrep handles keystrokes while content grep is active.
+func (m *model) updateGrep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// results navigation phase
+	if m.grepResults != nil {
+		switch msg.String() {
+		case "esc":
+			// back to input phase
+			m.grepResults = nil
+			m.grepSelected = 0
+			return m, nil
+		case "up", "k":
+			if m.grepSelected > 0 {
+				m.grepSelected--
+			}
+			return m, nil
+		case "down", "j":
+			if m.grepSelected < len(m.grepResults)-1 {
+				m.grepSelected++
+			}
+			return m, nil
+		case "enter":
+			if m.grepSelected < len(m.grepResults) {
+				path := m.grepResults[m.grepSelected].Path
+				m.grepMode = false
+				m.grepResults = nil
+				m.focus = focusMain
+				return m, preview.Load(path)
+			}
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// input phase
+	switch msg.String() {
+	case "esc":
+		m.grepMode = false
+		m.grepRunning = false
+		return m, nil
+	case "enter":
+		query := strings.TrimSpace(m.grepInput.Value())
+		if query == "" || m.grepRunning {
+			return m, nil
+		}
+		m.grepRunning = true
+		m.grepQuery = query
+		return m, search.GrepCmd(m.filetree.Root.Path, query)
+	default:
+		var cmd tea.Cmd
+		m.grepInput, cmd = m.grepInput.Update(msg)
+		return m, cmd
+	}
 }
 
 // executeInputOp dispatches the appropriate file operation after the user

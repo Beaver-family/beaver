@@ -1,0 +1,71 @@
+version: 2
+
+project_name: beaver
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: beaver
+    main: ./cmd/beaver
+    binary: beaver
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: beaver
+    name_template: "beaver_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - configs/config.example.yaml
+
+checksum:
+  name_template: "beaver_{{ .Version }}_checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: Beaver-family
+    name: beaver
+  name_template: "v{{ .Version }}"
+
+brews:
+  - name: beaver
+    repository:
+      owner: Beaver-family
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/Beaver-family/beaver"
+    description: "A fast terminal file manager built with Go and Bubble Tea"
+    license: MIT
+    install: |
+      bin.install "beaver"
+      (etc/"beaver").mkpath
+      etc.install "configs/config.example.yaml" => "beaver/config.yaml"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/beaver --version 2>&1", 1)
