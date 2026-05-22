@@ -7,9 +7,11 @@ import (
 )
 
 type Tree struct {
-	Root     *Node
-	Flat     []*Node  // flattened visible nodes — what gets rendered
-	Selected int      // index into Flat
+	Root          *Node
+	Flat          []*Node // flattened visible nodes — what gets rendered
+	Selected      int     // index into Flat
+	ClipboardPath string  // path of the node in clipboard
+	ClipboardCut  bool    // true = cut (move), false = copy
 }
 
 func New(rootPath string) (*Tree, error) {
@@ -126,4 +128,35 @@ func (t *Tree) SelectedNode() *Node {
 		return nil
 	}
 	return t.Flat[t.Selected]
+}
+
+// Refresh reloads the children of dirPath and re-flattens the visible tree.
+// If dirPath is not found, falls back to refreshing from root.
+func (t *Tree) Refresh(dirPath string) {
+	node := t.findNode(t.Root, dirPath)
+	if node == nil {
+		node = t.Root
+	}
+	node.Children = nil
+	_ = loadChildren(node)
+	t.flatten()
+	if len(t.Flat) == 0 {
+		t.Selected = 0
+		return
+	}
+	if t.Selected >= len(t.Flat) {
+		t.Selected = len(t.Flat) - 1
+	}
+}
+
+func (t *Tree) findNode(n *Node, path string) *Node {
+	if n.Path == path {
+		return n
+	}
+	for _, child := range n.Children {
+		if found := t.findNode(child, path); found != nil {
+			return found
+		}
+	}
+	return nil
 }

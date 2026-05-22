@@ -12,6 +12,8 @@ var (
 	colorSelected  = lipgloss.Color("#c9cad1")
 	colorMuted     = lipgloss.Color("#7b7e8a")
 	colorConnector = lipgloss.Color("#2e2f34")
+	colorCut       = lipgloss.Color("#ff6b6b") // red — will be moved
+	colorCopy      = lipgloss.Color("#5DCAA5") // teal — will be copied
 )
 
 func (t *Tree) Render(width, height int) string {
@@ -27,7 +29,7 @@ func (t *Tree) Render(width, height int) string {
 
 	lines := make([]string, 0, len(t.Flat))
 	for i, node := range t.Flat {
-		line := renderNode(node, i, t.Flat, i == t.Selected, width)
+		line := renderNode(node, t, i, t.Flat, i == t.Selected, width)
 		lines = append(lines, line)
 	}
 
@@ -52,7 +54,8 @@ func (t *Tree) Render(width, height int) string {
 }
 
 
-func renderNode(node *Node, idx int, flat []*Node, selected bool, width int) string {
+func renderNode(node *Node, t *Tree, idx int, flat []*Node, selected bool, width int) string {
+	_ = idx
 	// build connector prefix
 	prefix := buildPrefix(node, idx, flat)
 
@@ -75,9 +78,16 @@ func renderNode(node *Node, idx int, flat []*Node, selected bool, width int) str
 	}
 
 	// name
+	inClipboard := t.ClipboardPath != "" && node.Path == t.ClipboardPath
 	nameStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	if selected {
 		nameStyle = lipgloss.NewStyle().Foreground(colorSelected)
+	} else if inClipboard {
+		if t.ClipboardCut {
+			nameStyle = lipgloss.NewStyle().Foreground(colorCut)
+		} else {
+			nameStyle = lipgloss.NewStyle().Foreground(colorCopy)
+		}
 	}
 
 	connStyle := lipgloss.NewStyle().Foreground(colorConnector)

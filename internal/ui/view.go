@@ -28,44 +28,43 @@ func (m *model) View() string {
 	}
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
 
-	var l1L, l2L string
-	if m.editMode {
-		mode := lipgloss.NewStyle().Foreground(styles.ColorHighlight).Bold(true).Render("EDIT")
-		indent := strings.Repeat(" ", lipgloss.Width(mode))
-		extras := ""
-		if m.editConfirm {
-			extras = sep + warnStyle.Render("discard changes?") + "  " + k("y") + " yes  " + k("n/esc") + " no"
-		} else if m.editErr != "" {
-			extras = sep + warnStyle.Render(m.editErr)
-		}
-		l1L = mode + sep + k("ctrl+s") + " save" + sep + k("esc") + " discard" + extras
-		l2L = indent + sep + lipgloss.NewStyle().Foreground(styles.ColorMuted).Render(displayPath(m.editPath, m.width/2))
-	} else if m.focus == focusMain {
-		mode := lipgloss.NewStyle().Foreground(styles.ColorAccent).Bold(true).Render("PREVIEW")
-		indent := strings.Repeat(" ", lipgloss.Width(mode))
-		l1L = mode + sep + k("↑/↓") + " scroll" + sep + k("ctrl+d/u") + " half page" + sep + k("g/G") + " top/bot" + sep + k("e") + " edit"
-		l2L = indent + sep + k("tab") + " → files" + sep + k("esc/←") + " sidebar" + sep + k("pgup/dn") + " page"
+	var statusBar string
+	if m.opMode != opNone {
+		statusBar = m.renderOpStatusBar(m.width, bar)
 	} else {
-		mode := lipgloss.NewStyle().Foreground(styles.ColorText).Bold(true).Render("SIDEBAR")
-		indent := strings.Repeat(" ", lipgloss.Width(mode))
-		l1L = mode + sep + k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("l/→") + " preview"
-		l2L = indent + sep + k("tab") + " switch focus" + sep + k("q") + " quit"
-	}
-	l1L = "  " + l1L
-	l2L = "  " + l2L
+		var l1L, l2L string
+		if m.editMode {
+			extras := ""
+			if m.editConfirm {
+				extras = sep + warnStyle.Render("discard changes?") + "  " + k("y") + " yes  " + k("n/esc") + " no"
+			} else if m.editErr != "" {
+				extras = sep + warnStyle.Render(m.editErr)
+			}
+			l1L = k("ctrl+s") + " save" + sep + k("esc") + " discard" + extras
+			l2L = lipgloss.NewStyle().Foreground(styles.ColorMuted).Render(displayPath(m.editPath, m.width/2))
+		} else if m.focus == focusMain {
+			l1L = k("↑/↓") + " scroll" + sep + k("ctrl+d/u") + " half page" + sep + k("g/G") + " top/bot" + sep + k("e") + " edit"
+			l2L = k("tab") + " → files" + sep + k("esc/←") + " sidebar" + sep + k("pgup/dn") + " page"
+		} else {
+			l1L = k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("d") + " delete" + sep + k("r") + " rename"
+			l2L = k("n") + " new file" + sep + k("N") + " new dir" + sep + k("y/x") + " copy/cut" + sep + k("p") + " paste" + sep + k("q") + " quit"
+		}
+		l1L = "  " + l1L
+		l2L = "  " + l2L
 
-	l1R := lipgloss.NewStyle().Foreground(styles.ColorMuted).Render(dateStr + "  ")
-	l2R := lipgloss.NewStyle().Foreground(styles.ColorMuted).Render(timeStr + "  ")
-	g1 := m.width - lipgloss.Width(l1L) - lipgloss.Width(l1R)
-	if g1 < 0 {
-		g1 = 0
+		l1R := lipgloss.NewStyle().Foreground(styles.ColorText).Render(dateStr + "  ")
+		l2R := lipgloss.NewStyle().Foreground(styles.ColorAccent).Render(timeStr + "  ")
+		g1 := m.width - lipgloss.Width(l1L) - lipgloss.Width(l1R)
+		if g1 < 0 {
+			g1 = 0
+		}
+		g2 := m.width - lipgloss.Width(l2L) - lipgloss.Width(l2R)
+		if g2 < 0 {
+			g2 = 0
+		}
+		statusBar = bar.Width(m.width).Render(l1L+strings.Repeat(" ", g1)+l1R) + "\n" +
+			bar.Width(m.width).Render(l2L+strings.Repeat(" ", g2)+l2R)
 	}
-	g2 := m.width - lipgloss.Width(l2L) - lipgloss.Width(l2R)
-	if g2 < 0 {
-		g2 = 0
-	}
-	statusBar := bar.Width(m.width).Render(l1L+strings.Repeat(" ", g1)+l1R) + "\n" +
-		bar.Width(m.width).Render(l2L+strings.Repeat(" ", g2)+l2R)
 
 	panelHeight := m.height - 2
 	treeHeight := panelHeight - 2
@@ -86,35 +85,26 @@ func (m *model) View() string {
 	}
 
 	// ── sidebar ───────────────────────────────────────────────────────────────
+	// reserve lines at the bottom for op prompts / clipboard indicator / errors
+	bottomLines := m.sidebarBottomLineCount()
+	treeCap := treeHeight - bottomLines
+	if treeCap < 1 {
+		treeCap = 1
+	}
+
 	sidebarContent := sidebarLabel("files")
 	if m.filetree != nil {
-		sidebarContent += "\n" + m.filetree.Render(sw-2, treeHeight)
+		sidebarContent += "\n" + m.filetree.Render(sw-2, treeCap)
 	}
+	sidebarContent += m.renderSidebarBottom()
 
 	sidebar := sidebarStyle.
 		Width(sw).
 		Height(panelHeight).
 		Render(capLines(sidebarContent, panelHeight))
 
-	// ── right panel ───────────────────────────────────────────────────────────
-	rightContent := strings.Join([]string{
-		sidebarLabel("system"),
-		statRow("cpu", "12%"),
-		statRow("memory", "34%"),
-		statRow("disk", "55%"),
-		"",
-		sidebarLabel("network"),
-		statRow("latency", "18ms"),
-		statRow("uptime", "4h32m"),
-	}, "\n")
-
-	rightPanel := styles.StyleRightPanel.
-		Width(styles.RightPanelWidth).
-		Height(panelHeight).
-		Render(capLines(rightContent, panelHeight))
-
 	// ── main area ─────────────────────────────────────────────────────────────
-	mainWidth := m.width - sw - styles.RightPanelWidth - 4
+	mainWidth := m.width - sw - 2
 	if mainWidth < 0 {
 		mainWidth = 0
 	}
@@ -134,10 +124,108 @@ func (m *model) View() string {
 	body := lipgloss.JoinHorizontal(lipgloss.Top,
 		sidebar,
 		mainArea,
-		rightPanel,
 	)
 
 	return body + "\n" + statusBar
+}
+
+// renderOpStatusBar renders a nano-style two-line prompt in the status bar area.
+// Line 1: inverted/highlighted question bar.
+// Line 2: dark bar with Cancel on the left, action keys on the right.
+func (m *model) renderOpStatusBar(width int, bar lipgloss.Style) string {
+	promptBar := lipgloss.NewStyle().
+		Background(lipgloss.Color("#c0c1c7")).
+		Foreground(lipgloss.Color("#0a0b0d")).
+		Bold(true)
+
+	kOpt := func(s string) string {
+		return lipgloss.NewStyle().
+			Background(lipgloss.Color("#0a0b0d")).
+			Foreground(styles.ColorAccent).
+			Bold(true).
+			Render(" " + s + " ")
+	}
+
+	cancelOpt := kOpt("esc") + " Cancel"
+
+	optLine := func(question, opts string) string {
+		line1 := promptBar.Width(width).Render(question)
+		line2 := bar.Width(width).Render("  " + cancelOpt + "    " + opts)
+		return line1 + "\n" + line2
+	}
+
+	switch m.opMode {
+	case opConfirmDelete:
+		name := ""
+		if m.filetree != nil {
+			if node := m.filetree.SelectedNode(); node != nil {
+				name = node.Name
+			}
+		}
+		question := fmt.Sprintf(`  Delete "%s"  (ANSWERING "No" WILL KEEP THE FILE) ?`, name)
+		return optLine(question, kOpt("Y")+" Yes      "+kOpt("N")+" No")
+
+	case opConfirmPaste:
+		name := ""
+		action := "copy"
+		if m.clipboard != nil {
+			name = m.clipboard.Name
+		}
+		if m.clipCut {
+			action = "move"
+		}
+		dst := displayPath(m.opPasteDst, 40)
+		question := fmt.Sprintf(`  %s "%s"  →  "%s" ?`, strings.ToUpper(action), name, dst)
+		return optLine(question, kOpt("Y")+" Yes      "+kOpt("N")+" No")
+
+	case opInputRename:
+		return optLine("  Rename →  "+m.opInput.View(), kOpt("enter")+" Confirm")
+	case opInputNewFile:
+		return optLine("  New File →  "+m.opInput.View(), kOpt("enter")+" Confirm")
+	case opInputNewDir:
+		return optLine("  New Folder →  "+m.opInput.View(), kOpt("enter")+" Confirm")
+	}
+	return bar.Width(width).Render("") + "\n" + bar.Width(width).Render("")
+}
+
+// sidebarBottomLineCount returns lines reserved at the bottom of the sidebar
+// for clipboard indicator and op errors (prompts moved to status bar).
+func (m *model) sidebarBottomLineCount() int {
+	n := 0
+	if m.opErr != "" {
+		n++
+	}
+	if m.clipboard != nil {
+		n++
+	}
+	return n
+}
+
+// renderSidebarBottom renders the clipboard indicator and last op error at the
+// bottom of the sidebar. Op prompts live in the status bar (nano-style).
+func (m *model) renderSidebarBottom() string {
+	if m.sidebarBottomLineCount() == 0 {
+		return ""
+	}
+
+	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
+
+	var lines []string
+
+	if m.opErr != "" {
+		lines = append(lines, warn.Render("  ✗ "+m.opErr))
+	}
+
+	if m.clipboard != nil {
+		icon := "copy"
+		if m.clipCut {
+			icon = "cut"
+		}
+		lines = append(lines, muted.Render("  ["+icon+"] "+m.clipboard.Name))
+	}
+
+	return "\n" + strings.Join(lines, "\n")
 }
 
 func sidebarLabel(label string) string {
@@ -147,11 +235,6 @@ func sidebarLabel(label string) string {
 }
 
 
-func statRow(label, value string) string {
-	l := lipgloss.NewStyle().Foreground(styles.ColorMuted).Width(10).Render(label)
-	v := lipgloss.NewStyle().Foreground(styles.ColorText).Render(value)
-	return l + v
-}
 
 func (m *model) renderEditor() string {
 	accent := lipgloss.NewStyle().Foreground(styles.ColorHighlight)
@@ -209,7 +292,7 @@ func (m *model) renderPreview(width, height int) string {
 		if maxScroll > 0 {
 			pct = m.previewScroll * 100 / maxScroll
 		}
-		tag := muted.Render(" " + fmt.Sprintf("%d", pct) + "% ")
+		tag := accent.Render(" " + fmt.Sprintf("%d", pct) + "% ")
 		last := out[len(out)-1]
 		tagW := lipgloss.Width(tag)
 		lastW := lipgloss.Width(last)

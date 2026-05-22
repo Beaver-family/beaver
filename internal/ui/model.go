@@ -5,6 +5,18 @@ import (
 
 	"github.com/Beaver-family/tui/internal/ui/filetree"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
+)
+
+type opMode int
+
+const (
+	opNone opMode = iota
+	opConfirmDelete
+	opConfirmPaste
+	opInputRename
+	opInputNewFile
+	opInputNewDir
 )
 
 type model struct {
@@ -28,4 +40,12 @@ type model struct {
 	editModified bool
 	editConfirm  bool // waiting for discard y/n
 	editErr      string
+
+	// file operations
+	opMode    opMode
+	opInput   textinput.Model
+	opPasteDst string        // destination dir for pending paste confirmation
+	clipboard *filetree.Node
+	clipCut   bool
+	opErr     string
 }
