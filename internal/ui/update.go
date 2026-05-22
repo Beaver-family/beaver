@@ -2,11 +2,16 @@ package ui
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/Beaver-family/tui/internal/ui/editor"
+	"github.com/Beaver-family/tui/internal/ui/fileops"
+	"github.com/Beaver-family/tui/internal/ui/filetree"
 	"github.com/Beaver-family/tui/internal/ui/preview"
 	"github.com/Beaver-family/tui/internal/ui/styles"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/textinput"
 )
 
 const (
@@ -18,6 +23,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		// ── file op input/confirm mode ───────────────────────────────────────
+		if m.opMode != opNone {
+			return m.updateOp(msg)
+		}
+
 		// ── edit mode ────────────────────────────────────────────────────────
 		if m.editMode {
 			return m.updateEditor(msg)
@@ -93,7 +103,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "e":
-			// enter edit mode — only when a file is open in the preview
 			if m.focus == focusMain && m.previewPath != "" && m.previewErr == "" {
 				return m, m.enterEditMode()
 			}
@@ -107,6 +116,69 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.focus = focusMain
 					return m, preview.Load(node.Path)
 				}
+			}
+
+		// ── file operations ──────────────────────────────────────────────────
+		case "d":
+			if m.focus == focusSidebar && m.filetree != nil {
+				if node := m.filetree.SelectedNode(); node != nil {
+					m.opMode = opConfirmDelete
+					m.opErr = ""
+				}
+			}
+
+		case "r":
+			if m.focus == focusSidebar && m.filetree != nil {
+				if node := m.filetree.SelectedNode(); node != nil {
+					m.opInput = newOpInput("new name")
+					m.opInput.SetValue(node.Name)
+					m.opMode = opInputRename
+					m.opErr = ""
+				}
+			}
+
+		case "n":
+			if m.focus == focusSidebar && m.filetree != nil {
+				m.opInput = newOpInput("filename.txt")
+				m.opMode = opInputNewFile
+				m.opErr = ""
+			}
+
+		case "N":
+			if m.focus == focusSidebar && m.filetree != nil {
+				m.opInput = newOpInput("folder-name")
+				m.opMode = opInputNewDir
+				m.opErr = ""
+			}
+
+		case "y":
+			if m.focus == focusSidebar && m.filetree != nil {
+				if node := m.filetree.SelectedNode(); node != nil {
+					m.clipboard = node
+					m.clipCut = false
+					m.filetree.ClipboardPath = node.Path
+					m.filetree.ClipboardCut = false
+					m.opErr = ""
+				}
+			}
+
+		case "x":
+			if m.focus == focusSidebar && m.filetree != nil {
+				if node := m.filetree.SelectedNode(); node != nil {
+					m.clipboard = node
+					m.clipCut = true
+					m.filetree.ClipboardPath = node.Path
+					m.filetree.ClipboardCut = true
+					m.opErr = ""
+				}
+			}
+
+		case "p":
+			if m.focus == focusSidebar && m.filetree != nil && m.clipboard != nil {
+				node := m.filetree.SelectedNode()
+				m.opPasteDst = nodeDir(node, m.filetree.Root)
+				m.opMode = opConfirmPaste
+				m.opErr = ""
 			}
 		}
 
@@ -130,6 +202,27 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previewScroll = 0
 		m.previewErr = msg.Text
 
+	case fileops.DoneMsg:
+		m.opErr = ""
+		if m.filetree != nil {
+			m.filetree.Refresh(msg.Dir)
+			// for moves, also refresh the source directory
+			if msg.SrcDir != "" && msg.SrcDir != msg.Dir {
+				m.filetree.Refresh(msg.SrcDir)
+			}
+		}
+		// clear preview if the file it was showing no longer exists
+		if m.previewPath != "" {
+			if _, err := os.Stat(m.previewPath); err != nil {
+				m.previewPath = ""
+				m.previewLines = nil
+				m.previewErr = ""
+			}
+		}
+
+	case fileops.ErrMsg:
+		m.opErr = msg.Op + ": " + msg.Text
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -145,6 +238,107 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// updateOp handles key events while a file operation prompt is active.
+func (m *model) updateOp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.opMode {
+	case opConfirmDelete:
+		switch msg.String() {
+		case "y", "Y":
+			node := m.filetree.SelectedNode()
+			m.opMode = opNone
+			if node == nil {
+				return m, nil
+			}
+			return m, fileops.DeleteCmd(node.Path)
+		case "n", "N", "esc":
+			m.opMode = opNone
+		}
+		return m, nil
+
+	case opConfirmPaste:
+		switch msg.String() {
+		case "y", "Y":
+			src := m.clipboard.Path
+			isCut := m.clipCut
+			dst := m.opPasteDst
+			m.opMode = opNone
+			if isCut {
+				// clear clipboard — a cut can only be pasted once
+				m.clipboard = nil
+				m.clipCut = false
+				m.filetree.ClipboardPath = ""
+			}
+			if isCut {
+				return m, fileops.MoveCmd(src, dst)
+			}
+			return m, fileops.CopyCmd(src, dst)
+		case "n", "N", "esc":
+			m.opMode = opNone
+		}
+		return m, nil
+
+	case opInputRename, opInputNewFile, opInputNewDir:
+		switch msg.String() {
+		case "enter":
+			val := strings.TrimSpace(m.opInput.Value())
+			mode := m.opMode
+			m.opMode = opNone
+			if val == "" {
+				return m, nil
+			}
+			return m, m.executeInputOp(mode, val)
+		case "esc":
+			m.opMode = opNone
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.opInput, cmd = m.opInput.Update(msg)
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+// executeInputOp dispatches the appropriate file operation after the user
+// confirms an input prompt.
+func (m *model) executeInputOp(mode opMode, val string) tea.Cmd {
+	node := m.filetree.SelectedNode()
+	switch mode {
+	case opInputRename:
+		if node == nil {
+			return nil
+		}
+		return fileops.RenameCmd(node.Path, val)
+	case opInputNewFile:
+		return fileops.CreateFileCmd(nodeDir(node, m.filetree.Root), val)
+	case opInputNewDir:
+		return fileops.CreateDirCmd(nodeDir(node, m.filetree.Root), val)
+	}
+	return nil
+}
+
+// nodeDir returns the directory to use for operations: if node is a directory
+// use it directly, otherwise use its parent. Falls back to tree root.
+func nodeDir(node *filetree.Node, root *filetree.Node) string {
+	if node == nil {
+		return root.Path
+	}
+	if node.IsDir {
+		return node.Path
+	}
+	return filepath.Dir(node.Path)
+}
+
+// newOpInput creates a focused single-line text input for file op prompts.
+func newOpInput(placeholder string) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = placeholder
+	ti.CharLimit = 255
+	ti.Prompt = "> "
+	ti.Focus()
+	return ti
 }
 
 // updateEditor handles all key events while in edit mode.
@@ -178,9 +372,7 @@ func (m *model) updateEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// clear any previous save error on next keystroke
 	m.editErr = ""
-
 	var cmd tea.Cmd
 	m.editor, cmd = m.editor.Update(msg)
 	m.editModified = true
@@ -215,11 +407,10 @@ func (m *model) exitEditMode(saved bool) {
 // editorDimensions computes usable width/height for the textarea.
 func editorDimensions(m *model) (int, int) {
 	sw := styles.SidebarWidth()
-	mainWidth := m.width - sw - styles.RightPanelWidth - 4
+	mainWidth := m.width - sw - 2
 	if mainWidth < 4 {
 		mainWidth = 4
 	}
-	// subtract 2: header line + padding
 	h := m.height - 4
 	if h < 1 {
 		h = 1

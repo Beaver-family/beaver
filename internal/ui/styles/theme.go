@@ -35,11 +35,7 @@ var (
 			BorderForeground(ColorBorder).
 			PaddingLeft(1)
 
-	StyleRightPanel = lipgloss.NewStyle().
-			PaddingLeft(1)
 )
-
-const RightPanelWidth = 22
 
 func SidebarWidth() int {
 	return config.GetUIConfig().SidebarWidth
