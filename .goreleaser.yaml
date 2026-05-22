@@ -62,5 +62,4 @@ homebrew_casks:
     directory: Casks
     homepage: "https://github.com/Beaver-family/beaver"
     description: "A fast terminal file manager built with Go and Bubble Tea"
-    url_template: "https://github.com/Beaver-family/beaver/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     binary: beaver
