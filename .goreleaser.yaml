@@ -53,19 +53,14 @@ release:
     name: beaver
   name_template: "v{{ .Version }}"
 
-brews:
+homebrew_casks:
   - name: beaver
     repository:
       owner: Beaver-family
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: "https://github.com/Beaver-family/beaver"
     description: "A fast terminal file manager built with Go and Bubble Tea"
-    license: MIT
-    install: |
-      bin.install "beaver"
-      (etc/"beaver").mkpath
-      etc.install "configs/config.example.yaml" => "beaver/config.yaml"
-    test: |
-      assert_match version.to_s, shell_output("#{bin}/beaver --version 2>&1", 1)
+    url_template: "https://github.com/Beaver-family/beaver/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    binary: beaver
