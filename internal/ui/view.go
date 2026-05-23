@@ -460,7 +460,11 @@ func (m *model) renderChatPanel(width, height int) string {
 	toolStyle := lipgloss.NewStyle().Foreground(styles.Current.TextMuted).Italic(true)
 	highlight := lipgloss.NewStyle().Foreground(styles.ColorHighlight)
 
-	header := accent.Render(" Claude") + muted.Render("  AI agent  ·  can read & edit files")
+	providerLabel := "Claude"
+	if ai.ProviderForModel(m.activeModel) == ai.ProviderOpenAI {
+		providerLabel = "OpenAI"
+	}
+	header := accent.Render(" "+providerLabel) + muted.Render("  AI agent  ·  can read & edit files")
 
 	// reserve 2 lines: 1 header + 1 input
 	msgArea := height - 3
@@ -550,7 +554,16 @@ func (m *model) renderModelSelect(width, height int) string {
 		"",
 	}
 
+	lastProvider := ""
 	for i, opt := range ai.Models {
+		if opt.Provider != lastProvider {
+			label := "  ── Anthropic ──"
+			if opt.Provider == ai.ProviderOpenAI {
+				label = "  ── OpenAI ──"
+			}
+			lines = append(lines, muted.Render(label), "")
+			lastProvider = opt.Provider
+		}
 		cursor := "   "
 		nameStyle := title
 		if i == m.modelSelectIdx {
@@ -561,8 +574,7 @@ func (m *model) renderModelSelect(width, height int) string {
 		badge := ""
 		if isCurrent {
 			badge = "  " + accent.Render("(current)")
-		}
-		if opt.ID == ai.DefaultModel && !isCurrent {
+		} else if opt.ID == ai.DefaultModel {
 			badge = "  " + muted.Render("(default)")
 		}
 		lines = append(lines,
@@ -640,14 +652,23 @@ func (m *model) renderAPIKeySetup(width, height int) string {
 	warn := lipgloss.NewStyle().Foreground(styles.Current.Danger)
 	title := lipgloss.NewStyle().Foreground(styles.ColorText).Bold(true)
 
+	providerTitle := "  Claude AI Setup"
+	keyDesc := "  Enter your Anthropic API key to enable AI chat."
+	keyHint := "  Get a free key at: console.anthropic.com"
+	if m.apiKeyProvider == "openai" {
+		providerTitle = "  OpenAI Setup"
+		keyDesc = "  Enter your OpenAI API key to use GPT models."
+		keyHint = "  Get a key at: platform.openai.com/api-keys"
+	}
+
 	lines := []string{
 		"",
 		"",
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8C00")).Bold(true).Render("  Claude AI Setup"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8C00")).Bold(true).Render(providerTitle),
 		"",
-		title.Render("  Enter your Anthropic API key to enable AI chat."),
+		title.Render(keyDesc),
 		"",
-		muted.Render("  Get a free key at: console.anthropic.com"),
+		muted.Render(keyHint),
 		muted.Render("  Your key is saved locally and never shared."),
 		"",
 		"  " + m.apiKeyInput.View(),

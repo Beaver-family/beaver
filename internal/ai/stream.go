@@ -7,32 +7,72 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Available models shown in the picker.
+const (
+	ProviderAnthropic = "anthropic"
+	ProviderOpenAI    = "openai"
+)
+
+// ModelOption describes one entry in the model picker.
 type ModelOption struct {
 	ID          string
 	Name        string
 	Description string
+	Provider    string
 }
 
 var Models = []ModelOption{
+	// ── Anthropic ──────────────────────────────────────────────────────────
 	{
 		ID:          "claude-opus-4-7",
 		Name:        "Claude Opus 4.7",
 		Description: "Most capable · best for complex tasks · Jan 2026 knowledge",
+		Provider:    ProviderAnthropic,
 	},
 	{
 		ID:          "claude-sonnet-4-6",
 		Name:        "Claude Sonnet 4.6",
 		Description: "Recommended · fast & smart · Aug 2025 knowledge",
+		Provider:    ProviderAnthropic,
 	},
 	{
 		ID:          "claude-haiku-4-5-20251001",
 		Name:        "Claude Haiku 4.5",
 		Description: "Fastest & cheapest · great for quick questions",
+		Provider:    ProviderAnthropic,
+	},
+	// ── OpenAI ─────────────────────────────────────────────────────────────
+	{
+		ID:          "gpt-5.1-codex",
+		Name:        "GPT Codex (5.1)",
+		Description: "OpenAI's latest coding model · best for software engineering",
+		Provider:    ProviderOpenAI,
+	},
+	{
+		ID:          "gpt-4.1",
+		Name:        "GPT-4.1",
+		Description: "OpenAI's latest GPT-4 model · fast & capable",
+		Provider:    ProviderOpenAI,
+	},
+	{
+		ID:          "o3",
+		Name:        "o3",
+		Description: "OpenAI's frontier reasoning model · excels at hard problems",
+		Provider:    ProviderOpenAI,
 	},
 }
 
-const DefaultModel = "claude-sonnet-4-6"
+const DefaultModel       = "claude-sonnet-4-6"
+const DefaultOpenAIModel = "gpt-5.1-codex"
+
+// ProviderForModel returns the provider string for the given model ID.
+func ProviderForModel(id string) string {
+	for _, m := range Models {
+		if m.ID == id {
+			return m.Provider
+		}
+	}
+	return ProviderAnthropic
+}
 
 // Message is a single turn in the conversation.
 // Role is "user", "assistant", or "tool" (UI-only display; skipped when sending to API).

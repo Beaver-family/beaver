@@ -7,6 +7,7 @@ import (
 	"github.com/Beaver-family/beaver/internal/ui/filetree"
 	"github.com/Beaver-family/beaver/internal/ui/search"
 	"github.com/anthropics/anthropic-sdk-go"
+	openai "github.com/openai/openai-go/v3"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 )
@@ -76,15 +77,19 @@ type model struct {
 	chatBuf        string // accumulating current streamed response
 	anthropicClient *anthropic.Client
 
-	// api key setup
-	apiKeyMode  bool
-	apiKeyInput textinput.Model
-	apiKeyErr   string
+	// api key setup (shared for both providers)
+	apiKeyMode     bool
+	apiKeyInput    textinput.Model
+	apiKeyErr      string
+	apiKeyProvider string // "anthropic" or "openai"
 
 	// model selection
 	modelSelectMode bool
 	modelSelectIdx  int
 	activeModel     string // model ID currently in use
+
+	// openai client
+	openaiClient *openai.Client
 
 	// theme selection
 	themeSelectMode bool

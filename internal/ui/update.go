@@ -79,12 +79,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.apiKeyInput.Focus()
 			return m, nil
 		}
-		if err := ai.SaveKey(msg.key); err != nil {
-			m.apiKeyErr = "could not save key: " + err.Error()
-			return m, nil
+		if msg.provider == ai.ProviderOpenAI {
+			if err := ai.SaveOpenAIKey(msg.key); err != nil {
+				m.apiKeyErr = "could not save key: " + err.Error()
+				return m, nil
+			}
+			m.openaiClient = ai.NewOpenAIClient(msg.key)
+			if m.activeModel == "" || ai.ProviderForModel(m.activeModel) != ai.ProviderOpenAI {
+				m.activeModel = ai.DefaultOpenAIModel
+			}
+		} else {
+			if err := ai.SaveKey(msg.key); err != nil {
+				m.apiKeyErr = "could not save key: " + err.Error()
+				return m, nil
+			}
+			m.anthropicClient = ai.NewClient(msg.key)
+			m.activeModel = ai.LoadSavedModel()
 		}
-		m.anthropicClient = ai.NewClient(msg.key)
-		m.activeModel = ai.LoadSavedModel()
 		m.apiKeyMode = false
 		m.apiKeyErr = ""
 		m.chatMode = true
@@ -280,17 +291,37 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// ── ai chat ──────────────────────────────────────────────────────────
 		case "c":
-			if key := ai.ResolveAPIKey(); key != "" {
-				if m.anthropicClient == nil {
-					m.anthropicClient = ai.NewClient(key)
-					m.activeModel = ai.LoadSavedModel()
+			provider := ai.ProviderForModel(m.activeModel)
+			if provider == ai.ProviderOpenAI {
+				if key := ai.ResolveOpenAIKey(); key != "" {
+					if m.openaiClient == nil {
+						m.openaiClient = ai.NewOpenAIClient(key)
+						if m.activeModel == "" {
+							m.activeModel = ai.DefaultOpenAIModel
+						}
+					}
+					m.chatMode = true
+					m.chatInput = newChatInput()
+				} else {
+					m.apiKeyMode = true
+					m.apiKeyProvider = ai.ProviderOpenAI
+					m.apiKeyErr = ""
+					m.apiKeyInput = newAPIKeyInput("sk-...")
 				}
-				m.chatMode = true
-				m.chatInput = newChatInput()
 			} else {
-				m.apiKeyMode = true
-				m.apiKeyErr = ""
-				m.apiKeyInput = newAPIKeyInput()
+				if key := ai.ResolveAPIKey(); key != "" {
+					if m.anthropicClient == nil {
+						m.anthropicClient = ai.NewClient(key)
+						m.activeModel = ai.LoadSavedModel()
+					}
+					m.chatMode = true
+					m.chatInput = newChatInput()
+				} else {
+					m.apiKeyMode = true
+					m.apiKeyProvider = ai.ProviderAnthropic
+					m.apiKeyErr = ""
+					m.apiKeyInput = newAPIKeyInput("sk-ant-api03-...")
+				}
 			}
 			return m, nil
 
@@ -715,14 +746,20 @@ func loadSelected(m *model) tea.Cmd {
 // ── api key setup ─────────────────────────────────────────────────────────────
 
 type validateKeyMsg struct {
-	key string
-	err error
+	key      string
+	provider string
+	err      error
 }
 
-func validateKeyCmd(key string) tea.Cmd {
+func validateKeyCmd(key, provider string) tea.Cmd {
 	return func() tea.Msg {
-		err := ai.ValidateKey(key)
-		return validateKeyMsg{key: key, err: err}
+		var err error
+		if provider == ai.ProviderOpenAI {
+			err = ai.ValidateOpenAIKey(key)
+		} else {
+			err = ai.ValidateKey(key)
+		}
+		return validateKeyMsg{key: key, provider: provider, err: err}
 	}
 }
 
@@ -738,7 +775,7 @@ func (m *model) updateAPIKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.apiKeyErr = "validating..."
-		return m, validateKeyCmd(key)
+		return m, validateKeyCmd(key, m.apiKeyProvider)
 	default:
 		var cmd tea.Cmd
 		m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
@@ -762,9 +799,9 @@ func friendlyAPIKeyErr(err error) string {
 	}
 }
 
-func newAPIKeyInput() textinput.Model {
+func newAPIKeyInput(placeholder string) textinput.Model {
 	ti := textinput.New()
-	ti.Placeholder = "sk-ant-api03-..."
+	ti.Placeholder = placeholder
 	ti.CharLimit = 200
 	ti.Prompt = "> "
 	ti.EchoMode = textinput.EchoPassword
@@ -872,7 +909,12 @@ func (m *model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chatStreaming = true
 		m.chatBuf = ""
 		m.chatScroll = len(m.chatMessages) + 1
-		return m, ai.AgentCmd(m.anthropicClient, m.chatMessages, m.buildSystemPrompt(), m.activeModel, m.filetree.Root.Path)
+		sys := m.buildSystemPrompt()
+		root := m.filetree.Root.Path
+		if ai.ProviderForModel(m.activeModel) == ai.ProviderOpenAI {
+			return m, ai.OpenAIAgentCmd(m.openaiClient, m.chatMessages, sys, m.activeModel, root)
+		}
+		return m, ai.AgentCmd(m.anthropicClient, m.chatMessages, sys, m.activeModel, root)
 
 	default:
 		var cmd tea.Cmd

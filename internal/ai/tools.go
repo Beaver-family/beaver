@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	openai "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 // BuildTools returns the tool definitions sent to Claude.
@@ -51,6 +53,57 @@ func BuildTools() []anthropic.ToolUnionParam {
 			},
 			[]string{"query", "root_path"}),
 		mkTool("grep_content",
+			map[string]any{
+				"query":     prop("Text to search for inside files"),
+				"root_path": prop("Directory to search under"),
+			},
+			[]string{"query", "root_path"}),
+	}
+}
+
+// BuildOpenAITools returns the tool definitions for the OpenAI Chat Completions API.
+func BuildOpenAITools() []openai.ChatCompletionToolUnionParam {
+	prop := func(desc string) map[string]any {
+		return map[string]any{"type": "string", "description": desc}
+	}
+	mkTool := func(name, description string, props map[string]any, required []string) openai.ChatCompletionToolUnionParam {
+		return openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
+			Name:        name,
+			Description: openai.String(description),
+			Parameters: shared.FunctionParameters{
+				"type":       "object",
+				"properties": props,
+				"required":   required,
+			},
+		})
+	}
+
+	return []openai.ChatCompletionToolUnionParam{
+		mkTool("read_file", "Read the full contents of a file",
+			map[string]any{"path": prop("Absolute path to the file to read")},
+			[]string{"path"}),
+		mkTool("write_file", "Overwrite a file with new content",
+			map[string]any{
+				"path":    prop("Absolute path to write"),
+				"content": prop("Full new content of the file"),
+			},
+			[]string{"path", "content"}),
+		mkTool("create_file", "Create a new file",
+			map[string]any{
+				"path":    prop("Absolute path for the new file"),
+				"content": prop("Initial content (may be empty)"),
+			},
+			[]string{"path"}),
+		mkTool("list_directory", "List files in a directory",
+			map[string]any{"path": prop("Absolute path to the directory")},
+			[]string{"path"}),
+		mkTool("search_files", "Find files by name substring",
+			map[string]any{
+				"query":     prop("Filename query (case-insensitive substring)"),
+				"root_path": prop("Directory to search under"),
+			},
+			[]string{"query", "root_path"}),
+		mkTool("grep_content", "Search file contents for a string",
 			map[string]any{
 				"query":     prop("Text to search for inside files"),
 				"root_path": prop("Directory to search under"),
