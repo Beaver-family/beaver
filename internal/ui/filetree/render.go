@@ -3,6 +3,7 @@ package filetree
 import (
 	"strings"
 
+	"github.com/Beaver-family/beaver/internal/ui/git"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -14,6 +15,11 @@ var (
 	colorConnector = lipgloss.Color("#2e2f34")
 	colorCut       = lipgloss.Color("#ff6b6b") // red — will be moved
 	colorCopy      = lipgloss.Color("#5DCAA5") // teal — will be copied
+
+	// git status colours
+	colorGitStaged    = lipgloss.Color("#98C379") // green
+	colorGitModified  = lipgloss.Color("#E5C07B") // yellow
+	colorGitUntracked = lipgloss.Color("#E06C75") // red/salmon
 )
 
 func (t *Tree) Render(width, height int) string {
@@ -88,6 +94,11 @@ func renderNode(node *Node, t *Tree, idx int, flat []*Node, selected bool, width
 		} else {
 			nameStyle = lipgloss.NewStyle().Foreground(colorCopy)
 		}
+	} else if gs, ok := t.GitStatus[node.Path]; ok && gs != git.StateClean {
+		// git status: color both name and icon so the indicator is visible
+		c := gitColor(gs)
+		nameStyle = lipgloss.NewStyle().Foreground(c)
+		iconStyle = lipgloss.NewStyle().Foreground(c)
 	}
 
 	connStyle := lipgloss.NewStyle().Foreground(colorConnector)
@@ -151,6 +162,17 @@ func hasNextSibling(node *Node, flat []*Node) bool {
 		}
 	}
 	return false
+}
+
+func gitColor(gs git.FileState) lipgloss.Color {
+	switch gs {
+	case git.StateStaged:
+		return colorGitStaged
+	case git.StateModified:
+		return colorGitModified
+	default: // StateUntracked
+		return colorGitUntracked
+	}
 }
 
 func truncate(s string, max int) string {

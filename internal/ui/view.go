@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Beaver-family/beaver/internal/ai"
 	"github.com/Beaver-family/beaver/internal/ui/styles"
 	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/lipgloss"
@@ -29,12 +30,35 @@ func (m *model) View() string {
 	}
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
 
+	// full-screen overlays
+	if m.apiKeyMode {
+		return m.renderAPIKeySetup(m.width, m.height)
+	}
+	if m.modelSelectMode {
+		return m.renderModelSelect(m.width, m.height)
+	}
+
 	var statusBar string
 	if m.opMode != opNone || m.editConfirm {
 		statusBar = m.renderOpStatusBar(m.width, bar)
 	} else {
 		var l1L, l2L string
-		if m.searchMode {
+		if m.chatMode {
+			modelName := m.activeModel
+			for _, opt := range ai.Models {
+				if opt.ID == m.activeModel {
+					modelName = opt.Name
+					break
+				}
+			}
+			if m.chatStreaming {
+				l1L = lipgloss.NewStyle().Foreground(styles.ColorAccent).Render("  Claude is thinking...")
+			} else {
+				l1L = k("enter") + " send" + sep + k("↑/↓") + " scroll" + sep + k("m") + " model" + sep + k("esc") + " close"
+			}
+			l2L = lipgloss.NewStyle().Foreground(styles.ColorMuted).Render("  "+m.chatInput.View()) +
+				lipgloss.NewStyle().Foreground(styles.ColorAccent).Render("  "+modelName+"  ")
+		} else if m.searchMode {
 			cnt := fmt.Sprintf("  %d results", len(m.searchResults))
 			if m.searchInput.Value() == "" {
 				cnt = "  type to search"
@@ -65,7 +89,7 @@ func (m *model) View() string {
 			l2L = k("tab") + " → files" + sep + k("esc/←") + " sidebar" + sep + k("pgup/dn") + " page"
 		} else {
 			l1L = k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("d") + " delete" + sep + k("r") + " rename" + sep + k("/") + " search"
-			l2L = k("n") + " new file" + sep + k("N") + " new dir" + sep + k("y/x") + " copy/cut" + sep + k("p") + " paste" + sep + k("ctrl+f") + " grep" + sep + k("q") + " quit"
+			l2L = k("n") + " new file" + sep + k("N") + " new dir" + sep + k("y/x") + " copy/cut" + sep + k("p") + " paste" + sep + k("ctrl+f") + " grep" + sep + k("c") + " AI chat" + sep + k("q") + " quit"
 		}
 		l1L = "  " + l1L
 		l2L = "  " + l2L
@@ -94,7 +118,7 @@ func (m *model) View() string {
 	// focus-coloured borders
 	sidebarStyle := styles.StyleSidebar.BorderForeground(styles.ColorBorder)
 	mainStyle := styles.StyleMain.BorderForeground(styles.ColorBorder)
-	if m.editMode || m.grepMode {
+	if m.editMode || m.grepMode || m.chatMode {
 		mainStyle = styles.StyleMain.BorderForeground(styles.ColorHighlight)
 	} else if m.searchMode || m.focus == focusSidebar {
 		sidebarStyle = styles.StyleSidebar.BorderForeground(styles.ColorAccent)
@@ -133,7 +157,9 @@ func (m *model) View() string {
 	}
 
 	var mainContent string
-	if m.grepMode {
+	if m.chatMode {
+		mainContent = capLines(m.renderChatPanel(mainWidth, panelHeight), panelHeight)
+	} else if m.grepMode {
 		mainContent = capLines(m.renderGrepPanel(mainWidth, panelHeight), panelHeight)
 	} else if m.editMode {
 		mainContent = m.renderEditor()
@@ -420,6 +446,193 @@ func (m *model) renderGrepPanel(width, height int) string {
 		lines = append(lines, locStr+"  "+content)
 	}
 	return header + "\n" + strings.Join(lines, "\n")
+}
+
+// renderChatPanel renders the AI conversation in the main panel.
+func (m *model) renderChatPanel(width, height int) string {
+	accent := lipgloss.NewStyle().Foreground(styles.ColorAccent)
+	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+	userStyle := lipgloss.NewStyle().Foreground(styles.ColorText).Bold(true)
+	aiStyle := lipgloss.NewStyle().Foreground(styles.ColorAccent)
+	toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7a8a")).Italic(true)
+	highlight := lipgloss.NewStyle().Foreground(styles.ColorHighlight)
+
+	header := accent.Render(" Claude") + muted.Render("  AI agent  ·  can read & edit files")
+
+	// reserve 2 lines: 1 header + 1 input
+	msgArea := height - 3
+	if msgArea < 1 {
+		msgArea = 1
+	}
+
+	// build all message lines
+	var allLines []string
+	for _, msg := range m.chatMessages {
+		switch msg.Role {
+		case "user":
+			allLines = append(allLines, userStyle.Render("  You"))
+			for _, line := range strings.Split(msg.Content, "\n") {
+				allLines = append(allLines, "  "+muted.Render(truncateLine(line, width-4)))
+			}
+			allLines = append(allLines, "")
+		case "tool":
+			allLines = append(allLines, "  "+toolStyle.Render(truncateLine(msg.Content, width-4)))
+		default: // "assistant"
+			allLines = append(allLines, aiStyle.Render("  Claude"))
+			for _, line := range strings.Split(msg.Content, "\n") {
+				allLines = append(allLines, "  "+lipgloss.NewStyle().Foreground(styles.ColorText).Render(truncateLine(line, width-4)))
+			}
+			allLines = append(allLines, "")
+		}
+	}
+
+	// streaming response
+	if m.chatStreaming && m.chatBuf != "" {
+		allLines = append(allLines, aiStyle.Render("  Claude"))
+		for _, line := range strings.Split(m.chatBuf, "\n") {
+			allLines = append(allLines, "  "+lipgloss.NewStyle().Foreground(styles.ColorText).Render(truncateLine(line, width-4)))
+		}
+		allLines = append(allLines, highlight.Render("  ▌"))
+	} else if m.chatStreaming {
+		allLines = append(allLines, aiStyle.Render("  Claude  ")+highlight.Render("▌"))
+	}
+
+	if len(m.chatMessages) == 0 && !m.chatStreaming {
+		allLines = append(allLines,
+			muted.Render("  Ask anything about the current file or directory."),
+			"",
+			muted.Render("  The file you're viewing is included as context."),
+		)
+	}
+
+	// scroll: pin to bottom unless user scrolled up
+	start := 0
+	if len(allLines) > msgArea {
+		start = len(allLines) - msgArea
+		// apply user scroll offset (chatScroll counts from bottom)
+		scrollUp := len(m.chatMessages) + 1 - m.chatScroll
+		if scrollUp > 0 && start >= scrollUp {
+			start -= scrollUp
+		}
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + msgArea
+	if end > len(allLines) {
+		end = len(allLines)
+	}
+	visible := strings.Join(allLines[start:end], "\n")
+
+	divider := muted.Render("  " + strings.Repeat("─", width-4))
+	inputLine := "  " + m.chatInput.View()
+
+	return header + "\n" + visible + "\n" + divider + "\n" + inputLine
+}
+
+// renderModelSelect renders the full-screen model picker.
+func (m *model) renderModelSelect(width, height int) string {
+	accent := lipgloss.NewStyle().Foreground(styles.ColorAccent)
+	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+	title := lipgloss.NewStyle().Foreground(styles.ColorText).Bold(true)
+	selStyle := lipgloss.NewStyle().Foreground(styles.ColorAccent).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+
+	lines := []string{
+		"",
+		"",
+		accent.Render("  Choose a Model"),
+		"",
+		muted.Render("  ↑/↓ navigate    enter select    esc cancel"),
+		"",
+	}
+
+	for i, opt := range ai.Models {
+		cursor := "   "
+		nameStyle := title
+		if i == m.modelSelectIdx {
+			cursor = " → "
+			nameStyle = selStyle
+		}
+		isCurrent := opt.ID == m.activeModel
+		badge := ""
+		if isCurrent {
+			badge = "  " + accent.Render("(current)")
+		}
+		if opt.ID == ai.DefaultModel && !isCurrent {
+			badge = "  " + muted.Render("(default)")
+		}
+		lines = append(lines,
+			cursor+nameStyle.Render(opt.Name)+badge,
+			"     "+descStyle.Render(opt.Description),
+			"",
+		)
+	}
+
+	content := strings.Join(lines, "\n")
+	contentH := len(lines)
+	topPad := (height - contentH) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+
+	bg := lipgloss.NewStyle().
+		Background(lipgloss.Color("#0a0b0d")).
+		Width(width).
+		Height(height)
+
+	return bg.Render(capLines(strings.Repeat("\n", topPad)+content, height))
+}
+
+// renderAPIKeySetup renders the full-screen API key entry prompt.
+func (m *model) renderAPIKeySetup(width, height int) string {
+	accent := lipgloss.NewStyle().Foreground(styles.ColorAccent)
+	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
+	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
+	title := lipgloss.NewStyle().Foreground(styles.ColorText).Bold(true)
+
+	lines := []string{
+		"",
+		"",
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8C00")).Bold(true).Render("  Claude AI Setup"),
+		"",
+		title.Render("  Enter your Anthropic API key to enable AI chat."),
+		"",
+		muted.Render("  Get a free key at: console.anthropic.com"),
+		muted.Render("  Your key is saved locally and never shared."),
+		"",
+		"  " + m.apiKeyInput.View(),
+		"",
+	}
+
+	if m.apiKeyErr != "" {
+		if m.apiKeyErr == "validating..." {
+			lines = append(lines, accent.Render("  Validating key..."))
+		} else {
+			lines = append(lines, warn.Render("  ✗ "+m.apiKeyErr))
+		}
+	}
+
+	lines = append(lines,
+		"",
+		muted.Render("  press enter to confirm  │  esc to cancel"),
+	)
+
+	// center vertically
+	content := strings.Join(lines, "\n")
+	contentH := len(lines)
+	topPad := (height - contentH) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+
+	bg := lipgloss.NewStyle().
+		Background(lipgloss.Color("#0a0b0d")).
+		Width(width).
+		Height(height)
+
+	padded := strings.Repeat("\n", topPad) + content
+	return bg.Render(capLines(padded, height))
 }
 
 // truncateLine cuts a string to max visible columns, ANSI-safe.

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Beaver-family/beaver/internal/ui/filetree"
+	"github.com/Beaver-family/beaver/internal/ui/git"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -22,5 +23,9 @@ func New() *model {
 }
 
 func (m *model) Init() tea.Cmd {
-	return tickCmd()
+	cmds := []tea.Cmd{tickCmd()}
+	if m.filetree != nil {
+		cmds = append(cmds, git.LoadCmd(m.filetree.Root.Path))
+	}
+	return tea.Batch(cmds...)
 }

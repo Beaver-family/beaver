@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/Beaver-family/beaver/internal/ui/git"
 )
 
 type Tree struct {
@@ -12,6 +14,7 @@ type Tree struct {
 	Selected      int     // index into Flat
 	ClipboardPath string  // path of the node in clipboard
 	ClipboardCut  bool    // true = cut (move), false = copy
+	GitStatus     git.StatusMap
 }
 
 func New(rootPath string) (*Tree, error) {

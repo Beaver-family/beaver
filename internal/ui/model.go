@@ -3,8 +3,10 @@ package ui
 import (
 	"time"
 
+	"github.com/Beaver-family/beaver/internal/ai"
 	"github.com/Beaver-family/beaver/internal/ui/filetree"
 	"github.com/Beaver-family/beaver/internal/ui/search"
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 )
@@ -63,4 +65,24 @@ type model struct {
 	grepQuery    string
 	grepSelected int
 	grepRunning  bool
+
+	// ai chat
+	chatMode       bool
+	chatMessages   []ai.Message
+	chatInput      textinput.Model
+	chatScroll     int
+	chatStreaming   bool
+	chatStreamCh   <-chan ai.AgentEvent
+	chatBuf        string // accumulating current streamed response
+	anthropicClient *anthropic.Client
+
+	// api key setup
+	apiKeyMode  bool
+	apiKeyInput textinput.Model
+	apiKeyErr   string
+
+	// model selection
+	modelSelectMode bool
+	modelSelectIdx  int
+	activeModel     string // model ID currently in use
 }

@@ -1,13 +1,16 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/Beaver-family/beaver/internal/ai"
 	"github.com/Beaver-family/beaver/internal/ui/editor"
 	"github.com/Beaver-family/beaver/internal/ui/fileops"
 	"github.com/Beaver-family/beaver/internal/ui/filetree"
+	"github.com/Beaver-family/beaver/internal/ui/git"
 	"github.com/Beaver-family/beaver/internal/ui/preview"
 	"github.com/Beaver-family/beaver/internal/ui/search"
 	"github.com/Beaver-family/beaver/internal/ui/styles"
@@ -23,7 +26,81 @@ const (
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
+	case ai.StreamStartMsg:
+		m.chatStreamCh = msg.Ch
+		return m, ai.ReadAgentEvent(m.chatStreamCh)
+
+	case ai.StreamTokenMsg:
+		m.chatBuf += msg.Text
+		return m, ai.ReadAgentEvent(m.chatStreamCh)
+
+	case ai.AgentToolStarted:
+		// flush any text Claude produced before this tool call so it appears first
+		if m.chatBuf != "" {
+			m.chatMessages = append(m.chatMessages, ai.Message{Role: "assistant", Content: m.chatBuf})
+			m.chatBuf = ""
+		}
+		m.chatMessages = append(m.chatMessages, ai.Message{Role: "tool", Content: "⚙ " + msg.Name})
+		return m, ai.ReadAgentEvent(m.chatStreamCh)
+
+	case ai.AgentToolDone:
+		// update the matching pending tool message
+		for i := len(m.chatMessages) - 1; i >= 0; i-- {
+			if m.chatMessages[i].Role == "tool" && m.chatMessages[i].Content == "⚙ "+msg.Name {
+				icon := "✓"
+				if msg.IsError {
+					icon = "✗"
+				}
+				m.chatMessages[i].Content = icon + " " + msg.Name + ": " + msg.Summary
+				break
+			}
+		}
+		// refresh filetree and git status when agent writes or creates files
+		var extraCmd tea.Cmd
+		if (msg.Name == "write_file" || msg.Name == "create_file") && m.filetree != nil {
+			m.filetree.Refresh(m.filetree.Root.Path)
+			extraCmd = git.LoadCmd(m.filetree.Root.Path)
+		}
+		return m, tea.Batch(ai.ReadAgentEvent(m.chatStreamCh), extraCmd)
+
+	case ai.StreamDoneMsg:
+		m.chatStreaming = false
+		if m.chatBuf != "" {
+			m.chatMessages = append(m.chatMessages, ai.Message{Role: "assistant", Content: m.chatBuf})
+			m.chatBuf = ""
+		}
+		m.chatScroll = len(m.chatMessages)
+		return m, nil
+
+	case validateKeyMsg:
+		if msg.err != nil {
+			m.apiKeyErr = friendlyAPIKeyErr(msg.err)
+			m.apiKeyInput.Focus()
+			return m, nil
+		}
+		if err := ai.SaveKey(msg.key); err != nil {
+			m.apiKeyErr = "could not save key: " + err.Error()
+			return m, nil
+		}
+		m.anthropicClient = ai.NewClient(msg.key)
+		m.activeModel = ai.LoadSavedModel()
+		m.apiKeyMode = false
+		m.apiKeyErr = ""
+		m.chatMode = true
+		m.chatInput = newChatInput()
+		return m, nil
+
 	case tea.KeyMsg:
+		// ── model selection ──────────────────────────────────────────────────
+		if m.modelSelectMode {
+			return m.updateModelSelect(msg)
+		}
+
+		// ── api key setup ────────────────────────────────────────────────────
+		if m.apiKeyMode {
+			return m.updateAPIKey(msg)
+		}
+
 		// ── file op input/confirm mode ───────────────────────────────────────
 		if m.opMode != opNone {
 			return m.updateOp(msg)
@@ -32,6 +109,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ── edit mode ────────────────────────────────────────────────────────
 		if m.editMode {
 			return m.updateEditor(msg)
+		}
+
+		// ── chat mode ────────────────────────────────────────────────────────
+		if m.chatMode {
+			return m.updateChat(msg)
 		}
 
 		// ── search / grep modes ──────────────────────────────────────────────
@@ -190,6 +272,34 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.opErr = ""
 			}
 
+		// ── ai chat ──────────────────────────────────────────────────────────
+		case "c":
+			if key := ai.ResolveAPIKey(); key != "" {
+				if m.anthropicClient == nil {
+					m.anthropicClient = ai.NewClient(key)
+					m.activeModel = ai.LoadSavedModel()
+				}
+				m.chatMode = true
+				m.chatInput = newChatInput()
+			} else {
+				m.apiKeyMode = true
+				m.apiKeyErr = ""
+				m.apiKeyInput = newAPIKeyInput()
+			}
+			return m, nil
+
+		case "m":
+			m.modelSelectMode = true
+			// pre-select current model
+			m.modelSelectIdx = 0
+			for i, opt := range ai.Models {
+				if opt.ID == m.activeModel {
+					m.modelSelectIdx = i
+					break
+				}
+			}
+			return m, nil
+
 		// ── search ───────────────────────────────────────────────────────────
 		case "f", "/":
 			if m.focus == focusSidebar && m.filetree != nil {
@@ -247,6 +357,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.previewErr = ""
 			}
 		}
+		if m.filetree != nil {
+			return m, git.LoadCmd(m.filetree.Root.Path)
+		}
 
 	case fileops.ErrMsg:
 		m.opErr = msg.Op + ": " + msg.Text
@@ -265,6 +378,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.grepRunning = false
 		m.grepMode = false
 		m.opErr = "grep: " + msg.Text
+
+	case git.StatusMsg:
+		if m.filetree != nil {
+			m.filetree.GitStatus = msg.Status
+		}
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -498,7 +616,11 @@ func (m *model) updateEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.exitEditMode(true)
-		return m, preview.Load(m.editPath)
+		cmds := []tea.Cmd{preview.Load(m.editPath)}
+		if m.filetree != nil {
+			cmds = append(cmds, git.LoadCmd(m.filetree.Root.Path))
+		}
+		return m, tea.Batch(cmds...)
 
 	case "esc":
 		if m.editModified {
@@ -571,4 +693,184 @@ func loadSelected(m *model) tea.Cmd {
 		return nil
 	}
 	return preview.Load(node.Path)
+}
+
+// ── api key setup ─────────────────────────────────────────────────────────────
+
+type validateKeyMsg struct {
+	key string
+	err error
+}
+
+func validateKeyCmd(key string) tea.Cmd {
+	return func() tea.Msg {
+		err := ai.ValidateKey(key)
+		return validateKeyMsg{key: key, err: err}
+	}
+}
+
+func (m *model) updateAPIKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.apiKeyMode = false
+		m.apiKeyErr = ""
+		return m, nil
+	case "enter":
+		key := strings.TrimSpace(m.apiKeyInput.Value())
+		if key == "" {
+			return m, nil
+		}
+		m.apiKeyErr = "validating..."
+		return m, validateKeyCmd(key)
+	default:
+		var cmd tea.Cmd
+		m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
+		return m, cmd
+	}
+}
+
+func friendlyAPIKeyErr(err error) string {
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "401"), strings.Contains(s, "authentication_error"), strings.Contains(s, "invalid x-api-key"):
+		return "API key not recognised — double-check it at console.anthropic.com"
+	case strings.Contains(s, "403"):
+		return "Access denied — your key may not have permission to use this API"
+	case strings.Contains(s, "429"):
+		return "Rate limited — wait a moment and try again"
+	case strings.Contains(s, "no such host"), strings.Contains(s, "connection refused"), strings.Contains(s, "dial"):
+		return "No internet connection — check your network and try again"
+	default:
+		return "Could not validate key — check your connection and try again"
+	}
+}
+
+func newAPIKeyInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "sk-ant-api03-..."
+	ti.CharLimit = 200
+	ti.Prompt = "> "
+	ti.EchoMode = textinput.EchoPassword
+	ti.Focus()
+	return ti
+}
+
+// ── model selection ───────────────────────────────────────────────────────────
+
+func (m *model) updateModelSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.modelSelectMode = false
+		return m, nil
+	case "up", "k":
+		if m.modelSelectIdx > 0 {
+			m.modelSelectIdx--
+		}
+		return m, nil
+	case "down", "j":
+		if m.modelSelectIdx < len(ai.Models)-1 {
+			m.modelSelectIdx++
+		}
+		return m, nil
+	case "enter":
+		chosen := ai.Models[m.modelSelectIdx]
+		m.activeModel = chosen.ID
+		_ = ai.SaveModel(chosen.ID)
+		m.modelSelectMode = false
+		return m, nil
+	}
+	return m, nil
+}
+
+// ── ai chat ───────────────────────────────────────────────────────────────────
+
+func (m *model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "m":
+		if !m.chatStreaming {
+			m.modelSelectMode = true
+			m.modelSelectIdx = 0
+			for i, opt := range ai.Models {
+				if opt.ID == m.activeModel {
+					m.modelSelectIdx = i
+					break
+				}
+			}
+		}
+		return m, nil
+
+	case "esc":
+		if m.chatStreaming {
+			return m, nil // don't close while streaming
+		}
+		m.chatMode = false
+		return m, nil
+
+	case "up", "k":
+		if m.chatScroll > 0 {
+			m.chatScroll--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.chatScroll < len(m.chatMessages) {
+			m.chatScroll++
+		}
+		return m, nil
+
+	case "enter":
+		text := strings.TrimSpace(m.chatInput.Value())
+		if text == "" || m.chatStreaming {
+			return m, nil
+		}
+		m.chatMessages = append(m.chatMessages, ai.Message{Role: "user", Content: text})
+		m.chatInput.SetValue("")
+		m.chatStreaming = true
+		m.chatBuf = ""
+		m.chatScroll = len(m.chatMessages) + 1
+		return m, ai.AgentCmd(m.anthropicClient, m.chatMessages, m.buildSystemPrompt(), m.activeModel, m.filetree.Root.Path)
+
+	default:
+		var cmd tea.Cmd
+		m.chatInput, cmd = m.chatInput.Update(msg)
+		return m, cmd
+	}
+}
+
+// buildSystemPrompt builds context for Claude from the current file/directory.
+func (m *model) buildSystemPrompt() string {
+	var sb strings.Builder
+	sb.WriteString("You are an AI agent embedded in Beaver, a terminal file manager.\n")
+	sb.WriteString("You can read, write, and create files using the provided tools.\n")
+	sb.WriteString("Prefer using tools to look at actual file contents before answering questions about code.\n")
+
+	if m.filetree != nil {
+		fmt.Fprintf(&sb, "Current directory: %s\n", m.filetree.Root.Path)
+	}
+
+	if m.previewPath != "" && len(m.previewLines) > 0 {
+		fmt.Fprintf(&sb, "The user is currently viewing: %s\n", m.previewPath)
+		sb.WriteString("File contents (first 200 lines):\n```\n")
+		limit := len(m.previewLines)
+		if limit > 200 {
+			limit = 200
+		}
+		for _, line := range m.previewLines[:limit] {
+			sb.WriteString(line)
+			sb.WriteByte('\n')
+		}
+		sb.WriteString("```\n")
+	}
+
+	sb.WriteString("\nBe concise. Use markdown fences for code.")
+	return sb.String()
+}
+
+func newChatInput() textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = "ask anything about this file or directory..."
+	ti.CharLimit = 2000
+	ti.Prompt = "> "
+	ti.Focus()
+	return ti
 }
