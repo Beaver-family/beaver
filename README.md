@@ -19,11 +19,13 @@
 ## Features
 
 - **File tree** — navigate your filesystem with an expandable tree, folders-first sorting, hidden files skipped
+- **Git status colors** — modified files are yellow, staged files are green, untracked files are red; colors propagate up to parent directories
 - **Syntax-highlighted preview** — 300+ languages via [Chroma](https://github.com/alecthomas/chroma), Dracula theme
 - **In-app editor** — edit files without leaving the terminal, with line numbers and nano-style save/discard prompts
 - **Full file operations** — delete, rename, new file, new folder, copy, cut, paste with confirmation dialogs
 - **Fuzzy file search** — instantly filter files across the entire tree by name
 - **Content grep** — search inside files with async line-by-line results
+- **Claude AI agent** — press `c` to open an embedded AI assistant that can read, write, and create files in your project; choose from Opus, Sonnet, or Haiku
 - **Clipboard indicator** — cut items turn red, copied items turn teal in the tree
 - **Live clock** — date and time always visible in the status bar
 - **Zero config** — works out of the box, optional `config.yaml` for customisation
@@ -124,6 +126,18 @@ Beaver opens in whatever directory you run it from.
 | `ctrl+s` | Save |
 | `esc` | Discard (asks confirmation if modified) |
 
+### AI Agent
+
+| Key | Action |
+|---|---|
+| `c` | Open AI chat (prompts for API key on first use) |
+| `m` | Switch model (Opus / Sonnet / Haiku) |
+| `enter` | Send message |
+| `↑` / `↓` | Scroll conversation |
+| `esc` | Close chat |
+
+The agent can read, write, and create files in your project. Your API key is stored at `~/.config/beaver/apikey` and is never shared. Get a key at [console.anthropic.com](https://console.anthropic.com).
+
 ---
 
 ## Configuration
@@ -156,6 +170,55 @@ Requires Go 1.21+.
 ## Contributing
 
 Pull requests are welcome. For large changes, open an issue first to discuss what you'd like to change.
+
+---
+
+## Update
+
+### Homebrew
+
+```sh
+brew update && brew upgrade beaver
+```
+
+### Go install
+
+```sh
+go install github.com/Beaver-family/beaver/cmd/beaver@latest
+```
+
+### Binary
+
+Download the latest release from the [releases page](https://github.com/Beaver-family/beaver/releases/latest) and replace your existing binary.
+
+---
+
+## Uninstall
+
+### Homebrew
+
+```sh
+brew uninstall beaver
+brew untap Beaver-family/tap
+```
+
+### Go install
+
+```sh
+rm $(go env GOPATH)/bin/beaver
+```
+
+### Manual binary
+
+Delete the `beaver` binary from wherever you placed it on your `$PATH`.
+
+### Saved config and API key
+
+Beaver stores your API key and model preference here — remove this directory to wipe everything:
+
+```sh
+rm -rf ~/.config/beaver
+```
 
 ---
 
