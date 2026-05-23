@@ -42,8 +42,8 @@ var Models = []ModelOption{
 	},
 	// ── OpenAI ─────────────────────────────────────────────────────────────
 	{
-		ID:          "gpt-5.1-codex",
-		Name:        "GPT Codex (5.1)",
+		ID:          "gpt-5.3-codex",
+		Name:        "GPT Codex (5.3)",
 		Description: "OpenAI's dedicated coding model · best for software engineering",
 		Provider:    ProviderOpenAI,
 	},
@@ -56,7 +56,7 @@ var Models = []ModelOption{
 }
 
 const DefaultModel       = "claude-sonnet-4-6"
-const DefaultOpenAIModel = "gpt-5.1-codex"
+const DefaultOpenAIModel = "gpt-5.3-codex"
 
 // ProviderForModel returns the provider string for the given model ID.
 func ProviderForModel(id string) string {
