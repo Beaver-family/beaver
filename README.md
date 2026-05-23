@@ -41,6 +41,12 @@ brew tap Beaver-family/tap
 brew install beaver
 ```
 
+> **macOS Gatekeeper:** If macOS blocks the binary with "cannot be verified", run:
+> ```sh
+> xattr -d com.apple.quarantine $(which beaver)
+> ```
+> Then run `beaver` again. This is a one-time step for unsigned binaries.
+
 ### Go
 
 ```sh

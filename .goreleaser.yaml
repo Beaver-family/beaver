@@ -63,3 +63,7 @@ homebrew_casks:
     homepage: "https://github.com/Beaver-family/beaver"
     description: "A fast terminal file manager built with Go and Bubble Tea"
     binary: beaver
+    caveats: |
+      macOS Gatekeeper may block beaver on first run.
+      If you see "cannot be verified", run once:
+        xattr -d com.apple.quarantine $(which beaver)
