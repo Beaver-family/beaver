@@ -5,4 +5,5 @@ type UIConfig struct {
 	ShowKeyHints bool
 	ScrollSpeed  int
 	MouseEnabled bool
+	Theme        string
 }

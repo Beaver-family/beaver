@@ -3,3 +3,4 @@ ui:
   show_key_hints: true
   scroll_speed: 3
   mouse_enabled: true
+  theme: default      # default | dracula | nord | catppuccin | tokyonight

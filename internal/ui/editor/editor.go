@@ -1,11 +1,12 @@
 package editor
 
 import (
+	"github.com/Beaver-family/beaver/internal/ui/styles"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// New creates a textarea configured for code editing.
+// New creates a textarea configured for code editing using the active theme.
 func New(content string, width, height int) textarea.Model {
 	ta := textarea.New()
 	ta.SetValue(content)
@@ -14,18 +15,17 @@ func New(content string, width, height int) textarea.Model {
 	ta.ShowLineNumbers = true
 	ta.CharLimit = 0
 
-	// style the focused state to match the app theme
 	focused := ta.FocusedStyle
 	focused.Base = lipgloss.NewStyle()
-	focused.CursorLine = lipgloss.NewStyle().Background(lipgloss.Color("#1e1f24"))
-	focused.CursorLineNumber = lipgloss.NewStyle().Foreground(lipgloss.Color("#5DCAA5"))
-	focused.LineNumber = lipgloss.NewStyle().Foreground(lipgloss.Color("#3e3f4a"))
-	focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#c9cad1"))
+	focused.CursorLine = lipgloss.NewStyle().Background(styles.Current.EditorCursorBg)
+	focused.CursorLineNumber = lipgloss.NewStyle().Foreground(styles.Current.Accent)
+	focused.LineNumber = lipgloss.NewStyle().Foreground(styles.Current.EditorLineNum)
+	focused.Text = lipgloss.NewStyle().Foreground(styles.Current.Text)
 	ta.FocusedStyle = focused
 
 	blurred := ta.BlurredStyle
 	blurred.Base = lipgloss.NewStyle()
-	blurred.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#5a5c68"))
+	blurred.Text = lipgloss.NewStyle().Foreground(styles.Current.TextMuted)
 	ta.BlurredStyle = blurred
 
 	ta.Focus()

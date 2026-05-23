@@ -4,28 +4,14 @@ import (
 	"strings"
 
 	"github.com/Beaver-family/beaver/internal/ui/git"
+	"github.com/Beaver-family/beaver/internal/ui/styles"
 	"github.com/charmbracelet/lipgloss"
-)
-
-var (
-	colorFolder    = lipgloss.Color("#534AB7")
-	colorFile      = lipgloss.Color("#EF9F27")
-	colorSelected  = lipgloss.Color("#c9cad1")
-	colorMuted     = lipgloss.Color("#7b7e8a")
-	colorConnector = lipgloss.Color("#2e2f34")
-	colorCut       = lipgloss.Color("#ff6b6b") // red — will be moved
-	colorCopy      = lipgloss.Color("#5DCAA5") // teal — will be copied
-
-	// git status colours
-	colorGitStaged    = lipgloss.Color("#98C379") // green
-	colorGitModified  = lipgloss.Color("#E5C07B") // yellow
-	colorGitUntracked = lipgloss.Color("#E06C75") // red/salmon
 )
 
 func (t *Tree) Render(width, height int) string {
 	if len(t.Flat) == 0 {
 		return lipgloss.NewStyle().
-			Foreground(colorMuted).
+			Foreground(styles.Current.TextMuted).
 			Render("  empty directory")
 	}
 
@@ -50,7 +36,6 @@ func (t *Tree) Render(width, height int) string {
 		end = len(lines)
 	}
 
-	// hard cap — never return more than height lines
 	visible := lines[start:end]
 	if len(visible) > height {
 		visible = visible[:height]
@@ -59,13 +44,20 @@ func (t *Tree) Render(width, height int) string {
 	return strings.Join(visible, "\n")
 }
 
-
 func renderNode(node *Node, t *Tree, idx int, flat []*Node, selected bool, width int) string {
 	_ = idx
-	// build connector prefix
+
+	// colors read fresh each frame from the active theme
+	colorFolder    := styles.Current.Highlight
+	colorFile      := styles.Current.FileIcon
+	colorSelected  := styles.Current.Text
+	colorMuted     := styles.Current.TextMuted
+	colorConnector := styles.Current.Border
+	colorCut       := styles.Current.Danger
+	colorCopy      := styles.Current.Accent
+
 	prefix := buildPrefix(node, idx, flat)
 
-	// chevron for dirs
 	chevron := " "
 	if node.IsDir {
 		if node.Expanded {
@@ -75,7 +67,6 @@ func renderNode(node *Node, t *Tree, idx int, flat []*Node, selected bool, width
 		}
 	}
 
-	// icon
 	icon := "  "
 	iconStyle := lipgloss.NewStyle().Foreground(colorFile)
 	if node.IsDir {
@@ -83,7 +74,6 @@ func renderNode(node *Node, t *Tree, idx int, flat []*Node, selected bool, width
 		icon = " "
 	}
 
-	// name
 	inClipboard := t.ClipboardPath != "" && node.Path == t.ClipboardPath
 	nameStyle := lipgloss.NewStyle().Foreground(colorMuted)
 	if selected {
@@ -95,7 +85,6 @@ func renderNode(node *Node, t *Tree, idx int, flat []*Node, selected bool, width
 			nameStyle = lipgloss.NewStyle().Foreground(colorCopy)
 		}
 	} else if gs, ok := t.GitStatus[node.Path]; ok && gs != git.StateClean {
-		// git status: color both name and icon so the indicator is visible
 		c := gitColor(gs)
 		nameStyle = lipgloss.NewStyle().Foreground(c)
 		iconStyle = lipgloss.NewStyle().Foreground(c)
@@ -115,13 +104,11 @@ func renderNode(node *Node, t *Tree, idx int, flat []*Node, selected bool, width
 		nameStyle.Render(truncate(node.Name, available))
 }
 
-// buildPrefix builds the ├─ └─ │ connector string for a node.
 func buildPrefix(node *Node, idx int, flat []*Node) string {
 	if node.Depth == 0 {
 		return ""
 	}
 
-	// collect ancestors
 	ancestors := make([]bool, node.Depth)
 	current := node
 	for d := node.Depth - 1; d >= 0; d-- {
@@ -131,26 +118,22 @@ func buildPrefix(node *Node, idx int, flat []*Node) string {
 		}
 	}
 
-	prefix := ""
+	var sb strings.Builder
 	for d := 0; d < node.Depth-1; d++ {
 		if ancestors[d] {
-			prefix += "│ "
+			sb.WriteString("│ ")
 		} else {
-			prefix += "  "
+			sb.WriteString("  ")
 		}
 	}
-
 	if hasNextSibling(node, flat) {
-		prefix += "├─"
+		sb.WriteString("├─")
 	} else {
-		prefix += "└─"
+		sb.WriteString("└─")
 	}
-
-	return prefix
+	return sb.String()
 }
 
-// hasNextSibling checks if a node has a sibling after it in the flat list
-// at the same depth.
 func hasNextSibling(node *Node, flat []*Node) bool {
 	found := false
 	for _, n := range flat {
@@ -167,11 +150,11 @@ func hasNextSibling(node *Node, flat []*Node) bool {
 func gitColor(gs git.FileState) lipgloss.Color {
 	switch gs {
 	case git.StateStaged:
-		return colorGitStaged
+		return styles.Current.GitStaged
 	case git.StateModified:
-		return colorGitModified
-	default: // StateUntracked
-		return colorGitUntracked
+		return styles.Current.GitModified
+	default:
+		return styles.Current.GitUntracked
 	}
 }
 

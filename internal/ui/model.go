@@ -85,4 +85,8 @@ type model struct {
 	modelSelectMode bool
 	modelSelectIdx  int
 	activeModel     string // model ID currently in use
+
+	// theme selection
+	themeSelectMode bool
+	themeSelectIdx  int
 }

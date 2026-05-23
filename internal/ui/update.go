@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Beaver-family/beaver/internal/ai"
+	"github.com/Beaver-family/beaver/internal/config"
 	"github.com/Beaver-family/beaver/internal/ui/editor"
 	"github.com/Beaver-family/beaver/internal/ui/fileops"
 	"github.com/Beaver-family/beaver/internal/ui/filetree"
@@ -91,6 +92,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// ── theme selection ──────────────────────────────────────────────────
+		if m.themeSelectMode {
+			return m.updateThemeSelect(msg)
+		}
+
 		// ── model selection ──────────────────────────────────────────────────
 		if m.modelSelectMode {
 			return m.updateModelSelect(msg)
@@ -285,6 +291,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.apiKeyMode = true
 				m.apiKeyErr = ""
 				m.apiKeyInput = newAPIKeyInput()
+			}
+			return m, nil
+
+		case "t":
+			m.themeSelectMode = true
+			m.themeSelectIdx = 0
+			for i, key := range styles.ThemeNames {
+				if styles.Themes[key].Name == styles.Current.Name {
+					m.themeSelectIdx = i
+					break
+				}
 			}
 			return m, nil
 
@@ -777,6 +794,33 @@ func (m *model) updateModelSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeModel = chosen.ID
 		_ = ai.SaveModel(chosen.ID)
 		m.modelSelectMode = false
+		return m, nil
+	}
+	return m, nil
+}
+
+// ── theme selection ───────────────────────────────────────────────────────────
+
+func (m *model) updateThemeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.themeSelectMode = false
+		return m, nil
+	case "up", "k":
+		if m.themeSelectIdx > 0 {
+			m.themeSelectIdx--
+		}
+		return m, nil
+	case "down", "j":
+		if m.themeSelectIdx < len(styles.ThemeNames)-1 {
+			m.themeSelectIdx++
+		}
+		return m, nil
+	case "enter":
+		key := styles.ThemeNames[m.themeSelectIdx]
+		styles.SetTheme(key)
+		_ = config.SaveTheme(key)
+		m.themeSelectMode = false
 		return m, nil
 	}
 	return m, nil

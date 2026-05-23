@@ -21,14 +21,14 @@ func (m *model) View() string {
 	dateStr := m.now.Format("Mon, 02 Jan 2006")
 
 	bar := lipgloss.NewStyle().
-		Background(lipgloss.Color("#0a0b0d")).
-		Foreground(styles.ColorMuted)
+		Background(styles.Current.Background).
+		Foreground(styles.Current.TextMuted)
 
-	sep := lipgloss.NewStyle().Foreground(styles.ColorBorder).Render("  │  ")
+	sep := lipgloss.NewStyle().Foreground(styles.Current.Border).Render("  │  ")
 	k := func(s string) string {
-		return lipgloss.NewStyle().Foreground(styles.ColorAccent).Render(s)
+		return lipgloss.NewStyle().Foreground(styles.Current.Accent).Render(s)
 	}
-	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
+	warnStyle := lipgloss.NewStyle().Foreground(styles.Current.Danger)
 
 	// full-screen overlays
 	if m.apiKeyMode {
@@ -36,6 +36,9 @@ func (m *model) View() string {
 	}
 	if m.modelSelectMode {
 		return m.renderModelSelect(m.width, m.height)
+	}
+	if m.themeSelectMode {
+		return m.renderThemeSelect(m.width, m.height)
 	}
 
 	var statusBar string
@@ -89,7 +92,7 @@ func (m *model) View() string {
 			l2L = k("tab") + " → files" + sep + k("esc/←") + " sidebar" + sep + k("pgup/dn") + " page"
 		} else {
 			l1L = k("↑/↓") + " navigate" + sep + k("enter") + " open" + sep + k("d") + " delete" + sep + k("r") + " rename" + sep + k("/") + " search"
-			l2L = k("n") + " new file" + sep + k("N") + " new dir" + sep + k("y/x") + " copy/cut" + sep + k("p") + " paste" + sep + k("ctrl+f") + " grep" + sep + k("c") + " AI chat" + sep + k("q") + " quit"
+			l2L = k("n") + " new file" + sep + k("N") + " new dir" + sep + k("y/x") + " copy/cut" + sep + k("p") + " paste" + sep + k("ctrl+f") + " grep" + sep + k("c") + " AI chat" + sep + k("t") + " theme" + sep + k("q") + " quit"
 		}
 		l1L = "  " + l1L
 		l2L = "  " + l2L
@@ -115,15 +118,15 @@ func (m *model) View() string {
 	}
 	sw := styles.SidebarWidth()
 
-	// focus-coloured borders
-	sidebarStyle := styles.StyleSidebar.BorderForeground(styles.ColorBorder)
-	mainStyle := styles.StyleMain.BorderForeground(styles.ColorBorder)
+	// focus-coloured borders (styles are functions so they pick up the active theme)
+	sidebarStyle := styles.StyleSidebar()
+	mainStyle := styles.StyleMain()
 	if m.editMode || m.grepMode || m.chatMode {
-		mainStyle = styles.StyleMain.BorderForeground(styles.ColorHighlight)
+		mainStyle = mainStyle.BorderForeground(styles.Current.Highlight)
 	} else if m.searchMode || m.focus == focusSidebar {
-		sidebarStyle = styles.StyleSidebar.BorderForeground(styles.ColorAccent)
+		sidebarStyle = sidebarStyle.BorderForeground(styles.Current.Accent)
 	} else {
-		mainStyle = styles.StyleMain.BorderForeground(styles.ColorAccent)
+		mainStyle = mainStyle.BorderForeground(styles.Current.Accent)
 	}
 
 	// ── sidebar ───────────────────────────────────────────────────────────────
@@ -185,14 +188,14 @@ func (m *model) View() string {
 // Line 2: dark bar with Cancel on the left, action keys on the right.
 func (m *model) renderOpStatusBar(width int, bar lipgloss.Style) string {
 	promptBar := lipgloss.NewStyle().
-		Background(lipgloss.Color("#c0c1c7")).
-		Foreground(lipgloss.Color("#0a0b0d")).
+		Background(styles.Current.PromptBg).
+		Foreground(styles.Current.Background).
 		Bold(true)
 
 	kOpt := func(s string) string {
 		return lipgloss.NewStyle().
-			Background(lipgloss.Color("#0a0b0d")).
-			Foreground(styles.ColorAccent).
+			Background(styles.Current.Background).
+			Foreground(styles.Current.Accent).
 			Bold(true).
 			Render(" " + s + " ")
 	}
@@ -265,7 +268,7 @@ func (m *model) renderSidebarBottom() string {
 	}
 
 	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
-	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
+	warn := lipgloss.NewStyle().Foreground(styles.Current.Danger)
 
 	var lines []string
 
@@ -454,7 +457,7 @@ func (m *model) renderChatPanel(width, height int) string {
 	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
 	userStyle := lipgloss.NewStyle().Foreground(styles.ColorText).Bold(true)
 	aiStyle := lipgloss.NewStyle().Foreground(styles.ColorAccent)
-	toolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7a8a")).Italic(true)
+	toolStyle := lipgloss.NewStyle().Foreground(styles.Current.TextMuted).Italic(true)
 	highlight := lipgloss.NewStyle().Foreground(styles.ColorHighlight)
 
 	header := accent.Render(" Claude") + muted.Render("  AI agent  ·  can read & edit files")
@@ -577,7 +580,53 @@ func (m *model) renderModelSelect(width, height int) string {
 	}
 
 	bg := lipgloss.NewStyle().
-		Background(lipgloss.Color("#0a0b0d")).
+		Background(styles.Current.Background).
+		Width(width).
+		Height(height)
+
+	return bg.Render(capLines(strings.Repeat("\n", topPad)+content, height))
+}
+
+// renderThemeSelect renders the full-screen theme picker.
+func (m *model) renderThemeSelect(width, height int) string {
+	accent := lipgloss.NewStyle().Foreground(styles.Current.Accent)
+	muted := lipgloss.NewStyle().Foreground(styles.Current.TextMuted)
+	title := lipgloss.NewStyle().Foreground(styles.Current.Text).Bold(true)
+	selStyle := lipgloss.NewStyle().Foreground(styles.Current.Accent).Bold(true)
+
+	lines := []string{
+		"",
+		"",
+		accent.Render("  Choose a Theme"),
+		"",
+		muted.Render("  ↑/↓ navigate    enter select    esc cancel"),
+		"",
+	}
+
+	for i, key := range styles.ThemeNames {
+		t := styles.Themes[key]
+		cursor := "   "
+		nameStyle := title
+		if i == m.themeSelectIdx {
+			cursor = " → "
+			nameStyle = selStyle
+		}
+		badge := ""
+		if key == styles.Current.Name || t.Name == styles.Current.Name {
+			badge = "  " + accent.Render("(active)")
+		}
+		lines = append(lines, cursor+nameStyle.Render(t.Name)+badge, "")
+	}
+
+	content := strings.Join(lines, "\n")
+	contentH := len(lines)
+	topPad := (height - contentH) / 2
+	if topPad < 0 {
+		topPad = 0
+	}
+
+	bg := lipgloss.NewStyle().
+		Background(styles.Current.Background).
 		Width(width).
 		Height(height)
 
@@ -588,7 +637,7 @@ func (m *model) renderModelSelect(width, height int) string {
 func (m *model) renderAPIKeySetup(width, height int) string {
 	accent := lipgloss.NewStyle().Foreground(styles.ColorAccent)
 	muted := lipgloss.NewStyle().Foreground(styles.ColorMuted)
-	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b"))
+	warn := lipgloss.NewStyle().Foreground(styles.Current.Danger)
 	title := lipgloss.NewStyle().Foreground(styles.ColorText).Bold(true)
 
 	lines := []string{
@@ -627,7 +676,7 @@ func (m *model) renderAPIKeySetup(width, height int) string {
 	}
 
 	bg := lipgloss.NewStyle().
-		Background(lipgloss.Color("#0a0b0d")).
+		Background(styles.Current.Background).
 		Width(width).
 		Height(height)
 
