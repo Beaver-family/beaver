@@ -16,3 +16,15 @@ func tickCmd() tea.Cmd {
 func (t tickMsg) Time() time.Time {
 	return time.Time(t)
 }
+
+// spinnerTickMsg advances the loading spinner one frame.
+type spinnerTickMsg struct{}
+
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
+}
+
+// spinnerFrames is the braille spinner sequence.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}

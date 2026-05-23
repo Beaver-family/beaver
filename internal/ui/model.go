@@ -68,13 +68,14 @@ type model struct {
 	grepRunning  bool
 
 	// ai chat
-	chatMode       bool
-	chatMessages   []ai.Message
-	chatInput      textinput.Model
-	chatScroll     int
-	chatStreaming   bool
-	chatStreamCh   <-chan ai.AgentEvent
-	chatBuf        string // accumulating current streamed response
+	chatMode        bool
+	chatMessages    []ai.Message
+	chatInput       textinput.Model
+	chatScroll      int
+	chatStreaming    bool
+	chatStreamCh    <-chan ai.AgentEvent
+	chatBuf         string // accumulating current streamed response
+	spinnerFrame    int    // loading animation frame index
 	anthropicClient *anthropic.Client
 
 	// api key setup (shared for both providers)

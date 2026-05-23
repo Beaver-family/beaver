@@ -55,11 +55,11 @@ func (m *model) View() string {
 				}
 			}
 			if m.chatStreaming {
-				l1L = lipgloss.NewStyle().Foreground(styles.ColorAccent).Render("  Claude is thinking...")
+				l1L = lipgloss.NewStyle().Foreground(styles.ColorAccent).Render("  thinking...")
 			} else {
-				l1L = k("enter") + " send" + sep + k("↑/↓") + " scroll" + sep + k("m") + " model" + sep + k("esc") + " close"
+				l1L = k("enter") + " send" + sep + k("↑/↓") + " scroll" + sep + k("ctrl+o") + " model" + sep + k("ctrl+k") + " setup key" + sep + k("esc") + " close"
 			}
-			l2L = lipgloss.NewStyle().Foreground(styles.ColorMuted).Render("  "+m.chatInput.View()) +
+			l2L = lipgloss.NewStyle().Foreground(styles.ColorMuted).Render("  AI Chat") +
 				lipgloss.NewStyle().Foreground(styles.ColorAccent).Render("  "+modelName+"  ")
 		} else if m.searchMode {
 			cnt := fmt.Sprintf("  %d results", len(m.searchResults))
@@ -317,24 +317,30 @@ func (m *model) renderPreview(width, height int) string {
 	// header: shorten path with ~ then left-truncate so filename always shows
 	header := accent.Render(" " + displayPath(m.previewPath, width-2))
 
-	// clamp scroll
-	contentLines := height - 1 // 1 line for header
+	// content area: header eats 1 line
+	contentLines := height - 1
 	if contentLines < 1 {
 		contentLines = 1
 	}
-	maxScroll := len(m.previewLines) - contentLines
+	total := len(m.previewLines)
+	maxScroll := total - contentLines
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
-	if m.previewScroll > maxScroll {
-		m.previewScroll = maxScroll
+	// clamp purely locally — never mutate m.previewScroll inside View
+	scroll := m.previewScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
 	}
 
-	end := m.previewScroll + contentLines
-	if end > len(m.previewLines) {
-		end = len(m.previewLines)
+	end := scroll + contentLines
+	if end > total {
+		end = total
 	}
-	visible := m.previewLines[m.previewScroll:end]
+	visible := m.previewLines[scroll:end]
 
 	// truncate lines that are wider than the panel
 	out := make([]string, len(visible))
@@ -342,18 +348,14 @@ func (m *model) renderPreview(width, height int) string {
 		out[i] = truncateLine(l, width-1)
 	}
 
-	// scroll indicator: replace last line's tail with pct if file is scrollable
-	total := len(m.previewLines)
+	// scroll indicator on last line: show line range when file doesn't fit
 	if total > contentLines && len(out) > 0 {
-		pct := 0
-		if maxScroll > 0 {
-			pct = m.previewScroll * 100 / maxScroll
-		}
-		tag := accent.Render(" " + fmt.Sprintf("%d", pct) + "% ")
+		firstLine := scroll + 1
+		lastLine := scroll + len(out)
+		tag := accent.Render(fmt.Sprintf(" %d-%d/%d ", firstLine, lastLine, total))
 		last := out[len(out)-1]
 		tagW := lipgloss.Width(tag)
 		lastW := lipgloss.Width(last)
-		// content area = width-1 (PaddingLeft eats 1 col), never exceed it
 		avail := width - 1
 		if lastW+tagW <= avail {
 			last = last + strings.Repeat(" ", avail-lastW-tagW) + tag
@@ -484,8 +486,23 @@ func (m *model) renderChatPanel(width, height int) string {
 			allLines = append(allLines, "")
 		case "tool":
 			allLines = append(allLines, "  "+toolStyle.Render(truncateLine(msg.Content, width-4)))
+		case "system":
+			systemStyle := lipgloss.NewStyle().Foreground(styles.Current.Danger).Italic(true)
+			allLines = append(allLines, "")
+			for _, line := range strings.Split(msg.Content, "\n") {
+				if line == "" {
+					allLines = append(allLines, "")
+				} else {
+					allLines = append(allLines, "  "+systemStyle.Render(truncateLine(line, width-4)))
+				}
+			}
+			allLines = append(allLines, "")
 		default: // "assistant"
-			allLines = append(allLines, aiStyle.Render("  Claude"))
+			label := "Claude"
+			if msg.Provider == ai.ProviderOpenAI {
+				label = "OpenAI"
+			}
+			allLines = append(allLines, aiStyle.Render("  "+label))
 			for _, line := range strings.Split(msg.Content, "\n") {
 				allLines = append(allLines, "  "+lipgloss.NewStyle().Foreground(styles.ColorText).Render(truncateLine(line, width-4)))
 			}
@@ -494,14 +511,25 @@ func (m *model) renderChatPanel(width, height int) string {
 	}
 
 	// streaming response
+	streamLabel := "Claude"
+	if ai.ProviderForModel(m.activeModel) == ai.ProviderOpenAI {
+		streamLabel = "OpenAI"
+	}
+	spinner := spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+	spinnerStyle := lipgloss.NewStyle().Foreground(styles.Current.Accent).Bold(true)
 	if m.chatStreaming && m.chatBuf != "" {
-		allLines = append(allLines, aiStyle.Render("  Claude"))
+		allLines = append(allLines, aiStyle.Render("  "+streamLabel))
 		for _, line := range strings.Split(m.chatBuf, "\n") {
 			allLines = append(allLines, "  "+lipgloss.NewStyle().Foreground(styles.ColorText).Render(truncateLine(line, width-4)))
 		}
-		allLines = append(allLines, highlight.Render("  ▌"))
+		// blinking cursor: show ▌ on even frames, space on odd
+		cur := highlight.Render("▌")
+		if m.spinnerFrame%2 == 1 {
+			cur = " "
+		}
+		allLines = append(allLines, "  "+cur)
 	} else if m.chatStreaming {
-		allLines = append(allLines, aiStyle.Render("  Claude  ")+highlight.Render("▌"))
+		allLines = append(allLines, aiStyle.Render("  "+streamLabel+"  ")+spinnerStyle.Render(spinner))
 	}
 
 	if len(m.chatMessages) == 0 && !m.chatStreaming {
@@ -512,22 +540,24 @@ func (m *model) renderChatPanel(width, height int) string {
 		)
 	}
 
-	// scroll: pin to bottom unless user scrolled up
-	start := 0
-	if len(allLines) > msgArea {
-		start = len(allLines) - msgArea
-		// apply user scroll offset (chatScroll counts from bottom)
-		scrollUp := len(m.chatMessages) + 1 - m.chatScroll
-		if scrollUp > 0 && start >= scrollUp {
-			start -= scrollUp
-		}
+	// chatScroll = lines scrolled up from the bottom (0 = pinned at bottom).
+	// Clamp so the user can't scroll past the first line.
+	total := len(allLines)
+	maxScroll := total - msgArea
+	if maxScroll < 0 {
+		maxScroll = 0
 	}
+	scroll := m.chatScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	start := total - msgArea - scroll
 	if start < 0 {
 		start = 0
 	}
 	end := start + msgArea
-	if end > len(allLines) {
-		end = len(allLines)
+	if end > total {
+		end = total
 	}
 	visible := strings.Join(allLines[start:end], "\n")
 

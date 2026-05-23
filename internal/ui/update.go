@@ -24,21 +24,45 @@ const (
 	focusMain    = 1
 )
 
+const anthropicKeyMissingMsg = `No Anthropic API key found.
+
+  Set it via environment variable:
+    export ANTHROPIC_API_KEY=sk-ant-api03-...
+
+  Or press ctrl+k to enter your key here.
+  Get a free key at: console.anthropic.com`
+
+const openAIKeyMissingMsg = `No OpenAI API key found.
+
+  Set it via environment variable:
+    export OPENAI_API_KEY=sk-...
+
+  Or press ctrl+k to enter your key here.
+  Get a key at: platform.openai.com/api-keys`
+
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
+	case spinnerTickMsg:
+		if m.chatStreaming {
+			m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
+			return m, spinnerTickCmd()
+		}
+		return m, nil
+
 	case ai.StreamStartMsg:
 		m.chatStreamCh = msg.Ch
-		return m, ai.ReadAgentEvent(m.chatStreamCh)
+		m.spinnerFrame = 0
+		return m, tea.Batch(ai.ReadAgentEvent(m.chatStreamCh), spinnerTickCmd())
 
 	case ai.StreamTokenMsg:
 		m.chatBuf += msg.Text
 		return m, ai.ReadAgentEvent(m.chatStreamCh)
 
 	case ai.AgentToolStarted:
-		// flush any text Claude produced before this tool call so it appears first
+		// flush any text the model produced before this tool call so it appears first
 		if m.chatBuf != "" {
-			m.chatMessages = append(m.chatMessages, ai.Message{Role: "assistant", Content: m.chatBuf})
+			m.chatMessages = append(m.chatMessages, ai.Message{Role: "assistant", Content: m.chatBuf, Provider: ai.ProviderForModel(m.activeModel)})
 			m.chatBuf = ""
 		}
 		m.chatMessages = append(m.chatMessages, ai.Message{Role: "tool", Content: "⚙ " + msg.Name})
@@ -67,10 +91,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ai.StreamDoneMsg:
 		m.chatStreaming = false
 		if m.chatBuf != "" {
-			m.chatMessages = append(m.chatMessages, ai.Message{Role: "assistant", Content: m.chatBuf})
+			m.chatMessages = append(m.chatMessages, ai.Message{Role: "assistant", Content: m.chatBuf, Provider: ai.ProviderForModel(m.activeModel)})
 			m.chatBuf = ""
 		}
-		m.chatScroll = len(m.chatMessages)
+		m.chatScroll = 0
 		return m, nil
 
 	case validateKeyMsg:
@@ -98,8 +122,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.apiKeyMode = false
 		m.apiKeyErr = ""
-		m.chatMode = true
-		m.chatInput = newChatInput()
+		if !m.chatMode {
+			m.chatMode = true
+			m.chatInput = newChatInput()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -207,7 +233,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "G":
 			if m.focus == focusMain {
-				m.previewScroll = len(m.previewLines)
+				maxS := len(m.previewLines) - m.previewPageSize
+				if maxS < 0 {
+					maxS = 0
+				}
+				m.previewScroll = maxS
 			}
 
 		case "e":
@@ -291,38 +321,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// ── ai chat ──────────────────────────────────────────────────────────
 		case "c":
+			// always open chat — key setup is on-demand via ctrl+k inside chat
 			provider := ai.ProviderForModel(m.activeModel)
 			if provider == ai.ProviderOpenAI {
-				if key := ai.ResolveOpenAIKey(); key != "" {
-					if m.openaiClient == nil {
+				if m.openaiClient == nil {
+					if key := ai.ResolveOpenAIKey(); key != "" {
 						m.openaiClient = ai.NewOpenAIClient(key)
-						if m.activeModel == "" {
-							m.activeModel = ai.DefaultOpenAIModel
-						}
 					}
-					m.chatMode = true
-					m.chatInput = newChatInput()
-				} else {
-					m.apiKeyMode = true
-					m.apiKeyProvider = ai.ProviderOpenAI
-					m.apiKeyErr = ""
-					m.apiKeyInput = newAPIKeyInput("sk-...")
 				}
 			} else {
-				if key := ai.ResolveAPIKey(); key != "" {
-					if m.anthropicClient == nil {
+				if m.anthropicClient == nil {
+					if key := ai.ResolveAPIKey(); key != "" {
 						m.anthropicClient = ai.NewClient(key)
-						m.activeModel = ai.LoadSavedModel()
 					}
-					m.chatMode = true
-					m.chatInput = newChatInput()
-				} else {
-					m.apiKeyMode = true
-					m.apiKeyProvider = ai.ProviderAnthropic
-					m.apiKeyErr = ""
-					m.apiKeyInput = newAPIKeyInput("sk-ant-api03-...")
 				}
 			}
+			m.chatMode = true
+			m.chatInput = newChatInput()
 			return m, nil
 
 		case "t":
@@ -435,7 +450,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.previewPageSize = msg.Height - 4
+		// content area = panelHeight - 1 header line = (height-2) - 1 = height - 3
+		m.previewPageSize = msg.Height - 3
+		if m.previewPageSize < 1 {
+			m.previewPageSize = 1
+		}
+		// clamp scroll so resize never leaves it out of bounds
+		if maxS := len(m.previewLines) - m.previewPageSize; m.previewScroll > maxS {
+			if maxS < 0 {
+				m.previewScroll = 0
+			} else {
+				m.previewScroll = maxS
+			}
+		}
 		if m.editMode {
 			w, h := editorDimensions(m)
 			editor.Resize(&m.editor, w, h)
@@ -867,7 +894,7 @@ func (m *model) updateThemeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "m":
+	case "ctrl+o":
 		if !m.chatStreaming {
 			m.modelSelectMode = true
 			m.modelSelectIdx = 0
@@ -887,15 +914,26 @@ func (m *model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chatMode = false
 		return m, nil
 
-	case "up", "k":
+	case "up":
+		m.chatScroll++
+		return m, nil
+
+	case "down":
 		if m.chatScroll > 0 {
 			m.chatScroll--
 		}
 		return m, nil
 
-	case "down", "j":
-		if m.chatScroll < len(m.chatMessages) {
-			m.chatScroll++
+	case "ctrl+k":
+		if !m.chatStreaming {
+			m.apiKeyProvider = ai.ProviderForModel(m.activeModel)
+			m.apiKeyMode = true
+			m.apiKeyErr = ""
+			if m.apiKeyProvider == ai.ProviderOpenAI {
+				m.apiKeyInput = newAPIKeyInput("sk-...")
+			} else {
+				m.apiKeyInput = newAPIKeyInput("sk-ant-api03-...")
+			}
 		}
 		return m, nil
 
@@ -904,14 +942,26 @@ func (m *model) updateChat(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text == "" || m.chatStreaming {
 			return m, nil
 		}
+		// guard: if no client, key isn't configured — show inline instructions
+		provider := ai.ProviderForModel(m.activeModel)
+		if provider == ai.ProviderOpenAI && m.openaiClient == nil {
+			m.chatMessages = append(m.chatMessages, ai.Message{Role: "system", Content: openAIKeyMissingMsg})
+			m.chatScroll = 0
+			return m, nil
+		}
+		if provider != ai.ProviderOpenAI && m.anthropicClient == nil {
+			m.chatMessages = append(m.chatMessages, ai.Message{Role: "system", Content: anthropicKeyMissingMsg})
+			m.chatScroll = 0
+			return m, nil
+		}
 		m.chatMessages = append(m.chatMessages, ai.Message{Role: "user", Content: text})
 		m.chatInput.SetValue("")
 		m.chatStreaming = true
 		m.chatBuf = ""
-		m.chatScroll = len(m.chatMessages) + 1
+		m.chatScroll = 0
 		sys := m.buildSystemPrompt()
 		root := m.filetree.Root.Path
-		if ai.ProviderForModel(m.activeModel) == ai.ProviderOpenAI {
+		if provider == ai.ProviderOpenAI {
 			return m, ai.OpenAIAgentCmd(m.openaiClient, m.chatMessages, sys, m.activeModel, root)
 		}
 		return m, ai.AgentCmd(m.anthropicClient, m.chatMessages, sys, m.activeModel, root)

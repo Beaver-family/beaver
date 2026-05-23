@@ -44,19 +44,13 @@ var Models = []ModelOption{
 	{
 		ID:          "gpt-5.1-codex",
 		Name:        "GPT Codex (5.1)",
-		Description: "OpenAI's latest coding model · best for software engineering",
+		Description: "OpenAI's dedicated coding model · best for software engineering",
 		Provider:    ProviderOpenAI,
 	},
 	{
-		ID:          "gpt-4.1",
-		Name:        "GPT-4.1",
-		Description: "OpenAI's latest GPT-4 model · fast & capable",
-		Provider:    ProviderOpenAI,
-	},
-	{
-		ID:          "o3",
-		Name:        "o3",
-		Description: "OpenAI's frontier reasoning model · excels at hard problems",
+		ID:          "gpt-5.4",
+		Name:        "GPT-5.4",
+		Description: "OpenAI's latest flagship model · fast, smart, general purpose",
 		Provider:    ProviderOpenAI,
 	},
 }
@@ -75,10 +69,12 @@ func ProviderForModel(id string) string {
 }
 
 // Message is a single turn in the conversation.
-// Role is "user", "assistant", or "tool" (UI-only display; skipped when sending to API).
+// Role is "user", "assistant", "tool", or "system" (UI-only; tool/system skipped when sending to API).
+// Provider tags assistant messages with who produced them ("anthropic" or "openai").
 type Message struct {
-	Role    string
-	Content string
+	Role     string
+	Content  string
+	Provider string
 }
 
 // StreamTokenMsg carries one streamed text chunk.

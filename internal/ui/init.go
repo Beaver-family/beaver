@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Beaver-family/beaver/internal/ai"
 	"github.com/Beaver-family/beaver/internal/config"
 	"github.com/Beaver-family/beaver/internal/ui/filetree"
 	"github.com/Beaver-family/beaver/internal/ui/git"
@@ -21,8 +22,9 @@ func New() *model {
 	tree, _ := filetree.New(cwd)
 
 	return &model{
-		now:      time.Now(),
-		filetree: tree,
+		now:         time.Now(),
+		filetree:    tree,
+		activeModel: ai.LoadSavedModel(),
 	}
 }
 
